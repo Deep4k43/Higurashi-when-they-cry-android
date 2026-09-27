@@ -7153,7 +7153,72 @@ public class XServerDisplayActivity extends AppCompatActivity {
             state.setLinuxTurnipSysmem(choice);
             Log.i("XServerDisplayActivity", "Steam (Linux): Turnip sysmem " + (choice.isEmpty() ? "automatic" : choice) + " from the drawer, next session");
         };
+        state.onLinuxComponentsRefresh = this::refreshLinuxComponents;
+        state.onLinuxComponentSwap = this::swapLinuxComponent;
         addLinuxSteamButtons(rootView);
+    }
+
+    /**
+     * Re-reads the Protons for the drawer's Components tab, first running the swaps a closed game
+     * was holding back. Off the UI thread: it hashes every swapped file. (From The412Banner/DroidDeck.)
+     */
+    private void refreshLinuxComponents() {
+        new Thread(() -> {
+            java.util.List<String> applied;
+            try {
+                applied = com.winlator.star.linux.LinuxComponents.applyQueued(this);
+            } catch (Throwable t) {
+                Log.w("XServerDisplayActivity", "Steam (Linux): queued component swaps", t);
+                applied = java.util.Collections.emptyList();
+            }
+            com.winlator.star.linux.LinuxComponents.Snapshot snap;
+            try {
+                snap = com.winlator.star.linux.LinuxComponents.snapshot(this);
+            } catch (Throwable t) {
+                Log.w("XServerDisplayActivity", "Steam (Linux): reading the Protons' components", t);
+                snap = new com.winlator.star.linux.LinuxComponents.Snapshot(java.util.Collections.emptyList(), java.util.Collections.emptyList());
+            }
+            final java.util.List<String> done = applied;
+            final com.winlator.star.linux.LinuxComponents.Snapshot result = snap;
+            runOnUiThread(() -> {
+                XServerDrawerState.INSTANCE.setLinuxComponents(result);
+                if (!done.isEmpty()) Toast.makeText(this, "Applied: " + String.join(", ", done), Toast.LENGTH_LONG).show();
+            });
+        }, "linux-components").start();
+    }
+
+    /** A swap from the drawer's Components tab; {@code value} is "orig:<build>" or a stored package file. */
+    private void swapLinuxComponent(String protonId, String comp, String value) {
+        new Thread(() -> {
+            String message;
+            try {
+                com.winlator.star.linux.LinuxComponents.Snapshot snap = com.winlator.star.linux.LinuxComponents.snapshot(this);
+                com.winlator.star.linux.LinuxComponents.ProtonView view = null;
+                for (com.winlator.star.linux.LinuxComponents.ProtonView v : snap.getProtons()) {
+                    if (v.getProton().getId().equals(protonId)) { view = v; break; }
+                }
+                com.winlator.star.linux.LinuxComponents.Component st = view != null ? view.getComponents().get(comp) : null;
+                String current = st != null && st.getActiveFile() != null ? st.getActiveFile()
+                        : "orig:" + (view != null ? com.winlator.star.linux.LinuxComponents.safeName(view.getProton().getVersion()) : "");
+                if (st != null && st.getQueued() != null && value.equals(current)) {
+                    // Picking what is already in place again cancels the swap waiting for the game.
+                    com.winlator.star.linux.LinuxComponents.cancelQueued(this, protonId, comp);
+                    message = "The waiting swap was cancelled.";
+                } else if (value.startsWith("orig:")) {
+                    message = com.winlator.star.linux.LinuxComponents.restore(this, protonId, comp, value.substring("orig:".length()));
+                } else {
+                    message = com.winlator.star.linux.LinuxComponents.swap(this, protonId, value);
+                }
+            } catch (Throwable t) {
+                Log.w("XServerDisplayActivity", "Steam (Linux): component swap", t);
+                message = "Swap failed: " + (t.getMessage() != null ? t.getMessage() : t.getClass().getSimpleName());
+            }
+            final String text = message;
+            runOnUiThread(() -> {
+                Toast.makeText(this, text, Toast.LENGTH_LONG).show();
+                refreshLinuxComponents();
+            });
+        }, "linux-components-swap").start();
     }
 
     /**
