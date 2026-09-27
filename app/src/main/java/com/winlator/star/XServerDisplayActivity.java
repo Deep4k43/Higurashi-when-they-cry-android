@@ -8617,16 +8617,31 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 return true;
             }
             if (waylandCursorX < 0) { waylandCursorX = vw / 2f; waylandCursorY = vh / 2f; }
+            // The drawer's Cursor to Touch (Controls > Touch): the pointer sits under the finger
+            // instead of moving by the drag, so a tap lands where it is made. The same switch the
+            // X11 touchpad honours; here it was read by nothing, so the chip flipped and changed
+            // nothing in a Steam (Linux) session.
+            boolean cursorToTouch = preferences != null && preferences.getBoolean("move_cursor_to_touchpoint", false);
             switch (ev.getActionMasked()) {
                 case android.view.MotionEvent.ACTION_DOWN:
                     last[0] = ev.getX(); last[1] = ev.getY(); moved[0] = 0f;
+                    if (cursorToTouch) {
+                        waylandCursorX = Math.max(0f, Math.min(vw, ev.getX()));
+                        waylandCursorY = Math.max(0f, Math.min(vh, ev.getY()));
+                        updateWaylandCursor(vw, vh, 1); // motion: the client sees the hover before the tap
+                    }
                     break;
                 case android.view.MotionEvent.ACTION_MOVE: {
                     float dx = (ev.getX() - last[0]) * SENS, dy = (ev.getY() - last[1]) * SENS;
                     last[0] = ev.getX(); last[1] = ev.getY();
                     moved[0] += Math.abs(dx) + Math.abs(dy);
-                    waylandCursorX = Math.max(0f, Math.min(vw, waylandCursorX + dx));
-                    waylandCursorY = Math.max(0f, Math.min(vh, waylandCursorY + dy));
+                    if (cursorToTouch) {
+                        waylandCursorX = Math.max(0f, Math.min(vw, ev.getX()));
+                        waylandCursorY = Math.max(0f, Math.min(vh, ev.getY()));
+                    } else {
+                        waylandCursorX = Math.max(0f, Math.min(vw, waylandCursorX + dx));
+                        waylandCursorY = Math.max(0f, Math.min(vh, waylandCursorY + dy));
+                    }
                     updateWaylandCursor(vw, vh, 1); // motion
                     break;
                 }
