@@ -9106,6 +9106,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 new File(getFilesDir(), "pulseaudio"));
 
         List<String> session = linuxSessionArgs();
+        // Valve's ARM64 Proton, laid over the runtime before the client's first start so the first
+        // sign-in finds it installed (LinuxSteamSeed). Steam sessions only, once, and never fatal.
+        String protonSeed = session.contains(com.winlator.star.linux.LinuxRuntime.MODE_STEAM)
+                ? seedLinuxProton() : "not a Steam session";
         // Only the Steam mode signs in; a desktop session has no client and needs no hold. The
         // desktop can of course start Steam by hand, but taking the app's store offline for every
         // file-manager session would be a worse trade.
@@ -9252,6 +9256,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
             eff.append(String.format(java.util.Locale.US, "%-24s", "Settings container"))
                .append(container != null ? container.id + " (" + container.getName() + ")" : "none").append('\n');
+            eff.append(String.format(java.util.Locale.US, "%-24s", "ARM64 Proton seed")).append(protonSeed).append('\n');
             // The tuning switches too.
             // A measurement is only worth keeping if the report beside it says what was set when it was taken.
             eff.append("--- performance switches (entry settings) ---\n")
@@ -9679,6 +9684,53 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // loading screen rotates its own.)
         com.winlator.star.core.PreloaderState.show("Steam is starting…");
         winHandler.start();
+    }
+
+    /**
+     * Places Valve's Proton Experimental (ARM64) over the runtime the first time a Steam session
+     * starts, while the loading screen shows the download ("downloading Proton Experimental
+     * (ARM64) · 120 of 398 MB"), so the client finds the tool installed at its first sign-in and
+     * the session script has nothing to ask the client for. Worker thread, before the session's
+     * command is built. Never fatal: whatever goes wrong is logged, the line below goes into the
+     * device report, and the session falls back to the client fetching the depot itself.
+     *
+     * @return one line for device.txt: what was placed, or why nothing was
+     */
+    private String seedLinuxProton() {
+        try {
+            String placed = com.winlator.star.linux.LinuxSteamSeed.placedVersion(this);
+            if (placed != null) return "placed earlier (" + placed + ")";
+            if (!com.winlator.star.linux.LinuxSteamSeed.protonNeeded(this)) return "the client has it";
+            final String name = com.winlator.star.linux.LinuxSteamSeed.PROTON_NAME;
+            Log.i("XServerDisplayActivity", "Linux session: placing " + name + " before the client's first start");
+            // The centered status card, the same one the session's own milestones drive once it
+            // is running; linuxProgress writes to nothing else.
+            com.winlator.star.core.PreloaderState.show("Downloading " + name + "…");
+            final long startedAt = android.os.SystemClock.elapsedRealtime();
+            final String hint = "Once only · the Steam client keeps it up to date from here on";
+            com.winlator.star.linux.LinuxSteamSeed.Entry entry = com.winlator.star.linux.LinuxSteamSeed.fetchProton();
+            if (entry == null) {
+                Log.w("XServerDisplayActivity", "Linux session: the Proton seed catalog could not be read; the client will fetch the depot");
+                com.winlator.star.core.PreloaderState.linuxProgress("Starting the session · the client will fetch the compatibility layer itself", -1, null, null);
+                return "skipped: the catalog could not be read";
+            }
+            String problem = com.winlator.star.linux.LinuxSteamSeed.install(this, entry, (stage, percent) -> {
+                long seconds = (android.os.SystemClock.elapsedRealtime() - startedAt) / 1000;
+                String elapsed = String.format(java.util.Locale.US, "%d:%02d elapsed · still working",
+                        seconds / 60, seconds % 60);
+                com.winlator.star.core.PreloaderState.linuxProgress(stage, percent, elapsed, hint);
+            });
+            if (problem != null) {
+                Log.w("XServerDisplayActivity", "Linux session: " + name + " not placed (" + problem + "); the client will fetch the depot");
+                com.winlator.star.core.PreloaderState.linuxProgress("Starting the session · the client will fetch the compatibility layer itself", -1, null, null);
+                return "skipped: " + problem;
+            }
+            com.winlator.star.core.PreloaderState.linuxProgress(name + " is in place · starting the session", -1, null, null);
+            return "placed now (" + entry.version + ")";
+        } catch (Throwable t) {
+            Log.w("XServerDisplayActivity", "Linux session: Proton seed failed; the client will fetch the depot", t);
+            return "skipped: " + t;
+        }
     }
 
     /**
