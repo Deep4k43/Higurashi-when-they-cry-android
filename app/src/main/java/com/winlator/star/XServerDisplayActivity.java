@@ -7120,6 +7120,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         for (String key : LINUX_DRAWER_OPTIONS) options.put(key, com.winlator.star.linux.LinuxTuning.isOn(shortcut, key));
         state.setLinuxOptions(options);
         state.setLinuxTurnipSysmem(com.winlator.star.linux.LinuxTuning.turnipSysmemChoice(shortcut));
+        state.setLinuxTouch(com.winlator.star.linux.LinuxTuning.touchChoice(shortcut));
         state.setLinuxSteamSession(true);
         state.onLinuxSteamGuide = () -> pressLinuxSteamButton(false);
         state.onLinuxSteamQam = () -> pressLinuxSteamButton(true);
@@ -7138,6 +7139,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 if (linuxSteamButtons != null) linuxSteamButtons.setVisibility(on ? android.view.View.VISIBLE : android.view.View.GONE);
             }
             Log.i("XServerDisplayActivity", "Steam (Linux): " + key + " " + (on ? "on" : "off") + " from the drawer, saved to the entry");
+        };
+        state.onLinuxTouch = choice -> {
+            shortcut.putExtra(com.winlator.star.linux.LinuxTuning.EXTRA_TOUCH, choice.isEmpty() ? null : choice);
+            shortcut.saveData();
+            state.setLinuxTouch(choice);
+            // Read at every touch, so the next finger already takes the new path.
+            Log.i("XServerDisplayActivity", "Steam (Linux): touch " + (choice.isEmpty() ? "app setting" : "1".equals(choice) ? "touchscreen" : "touchpad") + " from the drawer");
         };
         state.onLinuxTurnipSysmem = choice -> {
             shortcut.putExtra(com.winlator.star.linux.LinuxTuning.EXTRA_TU_SYSMEM, choice.isEmpty() ? null : choice);
@@ -8577,6 +8585,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     waylandCursorView.setVisibility(View.GONE);
                 switch (act) {
                     case android.view.MotionEvent.ACTION_DOWN:
+                        // A first finger starts a new gesture, and Android has ended every earlier
+                        // one: whatever the compositor still holds (an up lost to the drawer opening
+                        // mid-touch) goes first, or every later touch lands on a stale sequence.
+                        com.winlator.star.wayland.WaylandCompositor.sendTouch(
+                                com.winlator.star.wayland.WaylandCompositor.TOUCH_CANCEL, 0, 0, 0);
+                        // fall through
                     case android.view.MotionEvent.ACTION_POINTER_DOWN: {
                         int i = ev.getActionIndex();
                         waylandSendFinger(com.winlator.star.wayland.WaylandCompositor.TOUCH_DOWN,
@@ -8817,11 +8831,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
         android.view.Choreographer.getInstance().postFrameCallback(waylandVsyncCallback);
     }
 
-    /** Touchscreen mode: fingers go to the guest as wl_touch. Shared with X11's setting. */
+    /**
+     * Touchscreen mode: fingers go to the guest as wl_touch. Shared with X11's setting, unless a
+     * Linux entry chose for itself (its Steam (Linux) settings, or the drawer's Steam client section).
+     */
     private boolean waylandTouchscreenMode() {
         SharedPreferences sp = preferences != null ? preferences
                 : PreferenceManager.getDefaultSharedPreferences(this);
-        return sp != null && sp.getBoolean("touchscreen_toggle", false);
+        boolean app = sp != null && sp.getBoolean("touchscreen_toggle", false);
+        if (gamescopeMode && shortcut != null) return com.winlator.star.linux.LinuxTuning.touchscreen(shortcut, app);
+        return app;
     }
 
     /** One finger to the compositor, view pixels -> output space (the same mapping the pointer uses). */

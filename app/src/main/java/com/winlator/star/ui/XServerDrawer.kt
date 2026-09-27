@@ -1396,6 +1396,31 @@ private fun LinuxSteamSection(state: XServerDrawerState) {
     HelperText("Presses the Steam button, or opens Steam's Quick Access Menu, on player one's controller.")
 
     Spacer(Modifier.height(6.dp))
+    val touch by state.linuxTouch.collectAsState()
+    Text("Touch", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        listOf("" to "App setting", "1" to "Touchscreen", "0" to "Touchpad").forEach { (value, label) ->
+            val selected = touch == value
+            Box(
+                contentAlignment = Alignment.Center,
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(if (selected) MaterialTheme.colorScheme.primary.copy(alpha = 0.25f) else MaterialTheme.colorScheme.surface)
+                    .border(1.dp, if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+                    .clickable {
+                        state.setLinuxTouch(value)
+                        state.onLinuxTouch?.accept(value)
+                    }
+                    .padding(vertical = 8.dp)
+            ) {
+                Text(label, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+            }
+        }
+    }
+    HelperText("Touchscreen: fingers reach Steam as real touches (Big Picture scrolls under one). Touchpad: a drag moves the pointer, a tap clicks. App setting follows the Touchscreen switch every container uses. Applies now.")
+
+    Spacer(Modifier.height(6.dp))
     ToggleRow("On-screen Steam and Quick Access buttons", on(LinuxTuning.EXTRA_STEAM_BUTTONS)) {
         flip(LinuxTuning.EXTRA_STEAM_BUTTONS, it)
     }

@@ -84,6 +84,8 @@ object XServerDrawerState {
     // Turnip sysmem: "" automatic, "1" on, "0" off (LinuxTuning.TU_SYSMEM_CHOICES).
     private val _linuxTurnipSysmem        = MutableStateFlow("")
     val linuxTurnipSysmem: StateFlow<String> = _linuxTurnipSysmem
+    private val _linuxTouch               = MutableStateFlow("")
+    val linuxTouch: StateFlow<String> = _linuxTouch
     // HDR output (Wayland, HDR sessions only). `available` = the compositor opened HDR for this session
     // (the game/container setting was on AND this screen reports HDR10) - the row is shown only then.
     // `output` = the live switch: on = the game's HDR frames go to the display as HDR, off = the same
@@ -498,6 +500,7 @@ object XServerDrawerState {
     @JvmField var onLinuxSteamQam: Runnable? = null
     @JvmField var onLinuxOption: java.util.function.BiConsumer<String, Boolean>? = null
     @JvmField var onLinuxTurnipSysmem: java.util.function.Consumer<String>? = null
+    @JvmField var onLinuxTouch: java.util.function.Consumer<String>? = null
     // HDR output switch: applied to the RUNNING compositor at once (nativeSetHdrOutput); nothing is
     // saved - it lasts for this session only.
     @JvmField var onWaylandHdrOutputToggle: java.util.function.Consumer<Boolean>? = null
@@ -557,6 +560,7 @@ object XServerDrawerState {
     fun setLinuxOptions(v: Map<String, Boolean>) { _linuxOptions.value = v }
     fun setLinuxOption(key: String, v: Boolean) { _linuxOptions.value = _linuxOptions.value + (key to v) }
     fun setLinuxTurnipSysmem(v: String)         { _linuxTurnipSysmem.value = v }
+    fun setLinuxTouch(v: String)                { _linuxTouch.value = v }
     fun setWaylandHdrAvailable(v: Boolean)      { _waylandHdrAvailable.value = v }
     fun setWaylandHdrOutput(v: Boolean)         { _waylandHdrOutput.value = v }
     fun setWaylandHdrOnScreen(v: Boolean)       { _waylandHdrOnScreen.value = v }
@@ -717,6 +721,7 @@ object XServerDrawerState {
         _linuxSteamSession.value = false
         _linuxOptions.value = emptyMap()
         _linuxTurnipSysmem.value = ""
+        _linuxTouch.value = ""
         _waylandHdrAvailable.value = false
         _waylandHdrOutput.value = true
         _waylandHdrOnScreen.value = false
@@ -788,7 +793,7 @@ object XServerDrawerState {
         onNativeRenderingToggle = null; onFpsConfigApply = null
         onWaylandZeroCopyToggle = null; onWaylandZeroCopyPoll = null
         onWaylandGlSafeModeToggle = null
-        onLinuxSteamGuide = null; onLinuxSteamQam = null; onLinuxOption = null; onLinuxTurnipSysmem = null
+        onLinuxSteamGuide = null; onLinuxSteamQam = null; onLinuxOption = null; onLinuxTurnipSysmem = null; onLinuxTouch = null
         onWaylandHdrOutputToggle = null
         onBionicFgConfigChange = null; onFpsLimitChange = null
         onPresentModeChange = null

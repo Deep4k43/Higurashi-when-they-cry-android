@@ -494,7 +494,10 @@ static void cursor_publish_hidden(void) {
 static void cursor_publish_shm(struct wl_shm_buffer *shm, int hx, int hy) {
     int32_t w = wl_shm_buffer_get_width(shm), h = wl_shm_buffer_get_height(shm);
     int32_t stride = wl_shm_buffer_get_stride(shm);
-    if (w <= 0 || h <= 0 || w * h > CURSOR_MAX_PX) return;
+    if (w <= 0 || h <= 0 || (int64_t)w * h > CURSOR_MAX_PX) return;
+    /* libwayland only promises stride >= width; each row copied here is width * 4 bytes, so a
+     * shorter stride would read past the end of the client's pool. */
+    if ((int64_t)stride < (int64_t)w * 4) return;
     wl_shm_buffer_begin_access(shm);
     const unsigned char *src = (const unsigned char *)wl_shm_buffer_get_data(shm);
     pthread_mutex_lock(&g_cursor_lock);
@@ -530,6 +533,9 @@ int banner_cursor_snapshot(int *out, int cap) {
 #define MAX_FINGERS 10
 struct finger { int id; struct surface *target; int active; };
 static struct finger g_fingers[MAX_FINGERS];
+/* Touchscreen mode on a client without wl_touch: the one finger driving the pointer, and where. */
+static int g_pointer_finger = -1;
+static double g_pointer_finger_x, g_pointer_finger_y;
 static struct surface *g_grab;              /* no-desktop fallback: surface holding the button */
 static struct surface *g_key_target;        /* no-desktop fallback: last clicked surface */
 static struct surface *g_ime_click;         /* last clicked program window: where text input goes */
@@ -3081,6 +3087,10 @@ static void deliver_touch(const struct input_msg *m, int action) {
         for (int i = 0; i < g_ntouches; i++)
             if (g_touches[i].focus) wl_touch_send_cancel(g_touches[i].touch);
         for (int i = 0; i < MAX_FINGERS; i++) g_fingers[i].active = 0;
+        if (g_pointer_finger >= 0) {  /* the pointer fallback's button, released where it was */
+            pointer_event(g_pointer_finger_x, g_pointer_finger_y, BTN_LEFT, 0);
+            g_pointer_finger = -1;
+        }
         wl_display_flush_clients(g_display);
         return;
     }
@@ -3098,7 +3108,26 @@ static void deliver_touch(const struct input_msg *m, int action) {
 
     struct surface *target = f->target;
     struct seat_touch *st = touch_for(wl_resource_get_client(target->resource));
-    if (!st) return;
+    if (!st) {
+        /* The client took no wl_touch (gamescope before 3.16.29-p3, a toolkit that never asks for
+         * touch): one finger drives the pointer instead, so touchscreen mode is never a dead end.
+         * A second finger is ignored while the first is down. (After The412Banner/DroidDeck.) */
+        if (action == 0) {
+            if (g_pointer_finger >= 0) { f->active = 0; return; }
+            g_pointer_finger = id;
+            pointer_event(x, y, BTN_LEFT, 1);
+        } else if (id == g_pointer_finger) {
+            if (action == 1) {
+                pointer_event(x, y, 0, 0);
+            } else {
+                pointer_event(x, y, BTN_LEFT, 0);
+                g_pointer_finger = -1;
+                f->active = 0;
+            }
+        }
+        g_pointer_finger_x = x; g_pointer_finger_y = y;
+        return;
+    }
     int tx = 0, ty = 0;
     if (target != g_desktop && target->placed) { tx = target->x; ty = target->y; }
     wl_fixed_t sx = wl_fixed_from_double(x - tx), sy = wl_fixed_from_double(y - ty);
