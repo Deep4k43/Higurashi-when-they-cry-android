@@ -2456,6 +2456,7 @@ static void seat_get_touch(struct wl_client *c, struct wl_resource *r, uint32_t 
     if (!t) { wl_client_post_no_memory(c); return; }
     wl_resource_set_implementation(t, &touch_impl, NULL, touch_res_destroy);
     if (g_ntouches < MAX_PTRS) { g_touches[g_ntouches].touch = t; g_touches[g_ntouches].focus = NULL; g_ntouches++; }
+    banner_log("touch", "%s takes touch (wl_touch v%u)", client_name(c), wl_resource_get_version(t));
 }
 static void seat_release(struct wl_client *c, struct wl_resource *r) { wl_resource_destroy(r); }
 static const struct wl_seat_interface seat_impl = {
@@ -3098,7 +3099,7 @@ static void deliver_touch(const struct input_msg *m, int action) {
     if (action == 0) {
         if (f) f->active = 0;                       /* stale id: start it again */
         struct surface *target = g_desktop ? g_desktop : toplevel_at(x, y);
-        if (!target) return;
+        if (!target) { banner_log("touch", "no window under the finger at %.0f,%.0f", x, y); return; }
         for (int i = 0; i < MAX_FINGERS && !f; i++)
             if (!g_fingers[i].active) f = &g_fingers[i];
         if (!f) return;                             /* more fingers than we track: ignore the extra */
@@ -3108,6 +3109,10 @@ static void deliver_touch(const struct input_msg *m, int action) {
 
     struct surface *target = f->target;
     struct seat_touch *st = touch_for(wl_resource_get_client(target->resource));
+    /* One line per gesture (first finger), so a test can see where a touch went. */
+    if (action == 0)
+        banner_log("touch", "%s gets %s at %.0f,%.0f (id %d)", client_name(wl_resource_get_client(target->resource)),
+                   st ? "touch" : "the pointer (it takes no touch)", x, y, id);
     if (!st) {
         /* The client took no wl_touch (gamescope before 3.16.29-p3, a toolkit that never asks for
          * touch): one finger drives the pointer instead, so touchscreen mode is never a dead end.
