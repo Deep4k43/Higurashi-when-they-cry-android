@@ -374,12 +374,15 @@ object LinuxComponents {
 
     /** Saves the originals of every Proton build not seen yet (first open, and after a Steam update). */
     @JvmStatic
-    fun snapshotAll(context: Context) = synchronized(lock) {
+    // Unit, not the Result of the last runCatching: a function returning Result gets a mangled JVM
+    // name, and the in-game drawer calls this from Java.
+    fun snapshotAll(context: Context): Unit = synchronized(lock) {
         val state = loadState(context)
         for (p in protons(context)) for (comp in COMPONENTS) {
             runCatching { ensureOriginal(context, p, comp, state) }.onFailure { Log.w(TAG, "original $comp of ${p.name}", it) }
         }
         runCatching { syncLaunchState(context, state) }.onFailure { Log.w(TAG, "launch state", it) }
+        Unit
     }
 
     // ------------------------------------------------------------------ view
