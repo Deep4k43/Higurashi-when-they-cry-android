@@ -11000,7 +11000,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // A Steam (Linux) session set to Touchscreen: fingers go past this view to the compositor's
         // surface, which hands them to gamescope as real touches (Big Picture scrolls under one).
         // Read at every touch, so the drawer's Touch choice applies at once.
-        touchpadView.setPassThrough(() -> gamescopeMode && waylandSurfaceView != null && waylandTouchscreenMode());
+        touchpadView.setPassThrough(() -> gamescopeMode && waylandTouchscreenMode(), () -> waylandSurfaceView);
         rootView.addView(touchpadView);
 
         inputControlsView = new InputControlsView(this, timeoutHandler, hideControlsRunnable);

@@ -237,15 +237,26 @@ public class TouchpadView extends View {
      * and turned it into mouse motion, so the session's own touch path never saw one.
      */
     private java.util.function.BooleanSupplier passThrough;
+    private java.util.function.Supplier<View> passThroughTarget;
 
-    public void setPassThrough(java.util.function.BooleanSupplier passThrough) {
+    /**
+     * The fingers are handed to {@code target} rather than refused: the on-screen controls call
+     * {@link #onTouchEvent} directly for every finger that misses a control, and a refusal there
+     * would lose the finger instead of letting it fall through.
+     */
+    public void setPassThrough(java.util.function.BooleanSupplier passThrough, java.util.function.Supplier<View> target) {
         this.passThrough = passThrough;
+        this.passThroughTarget = target;
     }
 
     @Override
     public boolean onTouchEvent(MotionEvent event) {
-        if (passThrough != null && passThrough.getAsBoolean()
-                && event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) return false;
+        View target = passThroughTarget != null ? passThroughTarget.get() : null;
+        if (target != null && passThrough != null && passThrough.getAsBoolean()
+                && event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) {
+            target.dispatchTouchEvent(event);
+            return true;
+        }
         // If mouse is disabled, ignore all input
         if (!mouseEnabled) return true;
         
