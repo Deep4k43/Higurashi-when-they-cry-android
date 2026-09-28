@@ -7171,6 +7171,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 Log.w("XServerDisplayActivity", "Steam (Linux): queued component swaps", t);
                 applied = java.util.Collections.emptyList();
             }
+            // Each Proton's current files are kept as its "Original" the first time it is read. The
+            // editor's tab did that and the drawer did not, so a drawer opened before the editor had
+            // no choices to offer: every component row was empty.
+            try {
+                com.winlator.star.linux.LinuxComponents.snapshotAll(this);
+            } catch (Throwable t) {
+                Log.w("XServerDisplayActivity", "Steam (Linux): saving the Protons' originals", t);
+            }
             com.winlator.star.linux.LinuxComponents.Snapshot snap;
             try {
                 snap = com.winlator.star.linux.LinuxComponents.snapshot(this);
