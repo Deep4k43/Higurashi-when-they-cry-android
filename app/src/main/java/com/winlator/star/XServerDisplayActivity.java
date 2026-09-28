@@ -10997,6 +10997,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // Cursor to Touch silently reverted to off every session until it was toggled again.
         touchpadView.setMoveCursorToTouchpoint(preferences.getBoolean("move_cursor_to_touchpoint", false));
         applyGestureConfig(); // wiring ran before this view existed; push the seeded set now
+        // A Steam (Linux) session set to Touchscreen: fingers go past this view to the compositor's
+        // surface, which hands them to gamescope as real touches (Big Picture scrolls under one).
+        // Read at every touch, so the drawer's Touch choice applies at once.
+        touchpadView.setPassThrough(() -> gamescopeMode && waylandSurfaceView != null && waylandTouchscreenMode());
         rootView.addView(touchpadView);
 
         inputControlsView = new InputControlsView(this, timeoutHandler, hideControlsRunnable);

@@ -230,8 +230,22 @@ public class TouchpadView extends View {
 //        this.isTouchscreenMode = isTouchscreenMode;
 //    }
 
+    /**
+     * When it answers true, this view takes no fingers and they fall through to the view beneath -
+     * the Wayland compositor's surface in a Steam (Linux) session set to Touchscreen, which sends
+     * each finger to the client as a real touch. Sitting on top, this view had taken every finger
+     * and turned it into mouse motion, so the session's own touch path never saw one.
+     */
+    private java.util.function.BooleanSupplier passThrough;
+
+    public void setPassThrough(java.util.function.BooleanSupplier passThrough) {
+        this.passThrough = passThrough;
+    }
+
     @Override
     public boolean onTouchEvent(MotionEvent event) {
+        if (passThrough != null && passThrough.getAsBoolean()
+                && event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) return false;
         // If mouse is disabled, ignore all input
         if (!mouseEnabled) return true;
         
