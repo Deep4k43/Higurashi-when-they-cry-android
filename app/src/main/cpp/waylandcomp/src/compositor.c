@@ -2488,6 +2488,9 @@ static struct seat_keyboard *keyboard_for(struct wl_client *client) {
 #define for_each_pointer_of(client, sp) \
     for (int _i = 0; _i < g_nptrs; _i++) \
         if (((sp) = &g_ptrs[_i]), wl_resource_get_client((sp)->ptr) == (client))
+#define for_each_touch_of(client, st) \
+    for (int _i = 0; _i < g_ntouches; _i++) \
+        if (((st) = &g_touches[_i]), wl_resource_get_client((st)->touch) == (client))
 #define for_each_keyboard_of(client, sk) \
     for (int _i = 0; _i < g_nkbs; _i++) \
         if (((sk) = &g_kbs[_i]), wl_resource_get_client((sk)->kb) == (client))
@@ -3137,18 +3140,27 @@ static void deliver_touch(const struct input_msg *m, int action) {
     if (target != g_desktop && target->placed) { tx = target->x; ty = target->y; }
     wl_fixed_t sx = wl_fixed_from_double(x - tx), sy = wl_fixed_from_double(y - ty);
     uint32_t t = now_ms();
+    struct wl_client *client = wl_resource_get_client(target->resource);
+    uint32_t serial = (action == 0 || action == 2) ? wl_display_next_serial(g_display) : 0;
 
-    if (action == 0) {
-        st->focus = target->resource;
-        wl_touch_send_down(st->touch, wl_display_next_serial(g_display), t, target->resource, id, sx, sy);
-    } else if (action == 1) {
-        wl_touch_send_motion(st->touch, t, id, sx, sy);
-    } else {
-        wl_touch_send_up(st->touch, wl_display_next_serial(g_display), t, id);
-        f->active = 0;
+    /* Every wl_touch the client holds gets the finger, not only the first one it asked for: a
+     * client can bind the seat more than once (gamescope's nested backend binds it on its own
+     * input thread as well), and only the one it listens on does anything with the event. Sent to
+     * just the first, a touch reached a resource nobody read and the drag did nothing - where
+     * DroidDeck, which sends to all of them, scrolled Big Picture. (After The412Banner/DroidDeck.) */
+    for_each_touch_of(client, st) {
+        if (action == 0) {
+            st->focus = target->resource;
+            wl_touch_send_down(st->touch, serial, t, target->resource, id, sx, sy);
+        } else if (action == 1) {
+            wl_touch_send_motion(st->touch, t, id, sx, sy);
+        } else {
+            wl_touch_send_up(st->touch, serial, t, id);
+        }
+        if (wl_resource_get_version(st->touch) >= WL_TOUCH_FRAME_SINCE_VERSION)
+            wl_touch_send_frame(st->touch);
     }
-    if (wl_resource_get_version(st->touch) >= WL_TOUCH_FRAME_SINCE_VERSION)
-        wl_touch_send_frame(st->touch);
+    if (action == 2) f->active = 0;
     wl_display_flush_clients(g_display);
 }
 
