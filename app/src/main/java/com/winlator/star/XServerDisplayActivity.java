@@ -2055,7 +2055,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             String fgProblem = s.getFgUnavailableReason().getValue();
             if (mult >= 2 && !fgProblem.isEmpty() && nativeFrameGenEngine()) {
                 s.setFrameGenMultiplier(0);
-                Toast.makeText(this, fgProblem, Toast.LENGTH_LONG).show();
+                showToast(this, fgProblem);
                 return;
             }
             // Wayland: both native engines run inside the Wayland compositor (framegen_bridge.c),
@@ -2734,8 +2734,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             Log.w("XServerDisplayActivity", "wayland: layer " + wineVersion + " (" + wineInfo.path
                     + ") lacks winewayland.so and/or lib/libvulkan_freedreno_wayland.so; launching on X11");
             waylandMode = false;
-            Toast.makeText(this, "Wayland needs the Wayland Proton layer (11.0-2.1 arm64ec); launching on X11.",
-                    Toast.LENGTH_LONG).show();
+            showToast(this, "Wayland needs the Wayland Proton layer (11.0-2.1 arm64ec); launching on X11.");
         }
 
         imageFs.setWinePath(wineInfo.path);
@@ -3854,7 +3853,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             + (detail.isEmpty() ? "" : " [" + detail + "]"));
         if (announce && !nativeFgProblemAnnounced) {
             nativeFgProblemAnnounced = true;
-            Toast.makeText(this, reason, Toast.LENGTH_LONG).show();
+            showToast(this, reason);
         }
     }
 
@@ -6892,7 +6891,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(Intent.createChooser(intent, "Open log folder"));
         } catch (Exception e) {
-            Toast.makeText(this, "Log folder: " + dir.getAbsolutePath(), Toast.LENGTH_LONG).show();
+            showToast(this, "Log folder: " + dir.getAbsolutePath());
         }
     }
 
@@ -7190,7 +7189,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             final com.winlator.star.linux.LinuxComponents.Snapshot result = snap;
             runOnUiThread(() -> {
                 XServerDrawerState.INSTANCE.setLinuxComponents(result);
-                if (!done.isEmpty()) Toast.makeText(this, "Applied: " + String.join(", ", done), Toast.LENGTH_LONG).show();
+                if (!done.isEmpty()) showToast(this, "Applied: " + String.join(", ", done));
             });
         }, "linux-components").start();
     }
@@ -7223,7 +7222,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             }
             final String text = message;
             runOnUiThread(() -> {
-                Toast.makeText(this, text, Toast.LENGTH_LONG).show();
+                showToast(this, text);
                 refreshLinuxComponents();
             });
         }, "linux-components-swap").start();
@@ -14876,8 +14875,7 @@ return true;
         // them why. Suppressed for the untouched default (extra absent) so we never nag users who never
         // opted in; the capability guard above already prevents the functional regression regardless.
         if (unlock && !capable && explicit) {
-            runOnUiThread(() -> Toast.makeText(this,
-                    R.string.refresh_unlock_needs_compatible_layer, Toast.LENGTH_LONG).show());
+            runOnUiThread(() -> showToast(this, R.string.refresh_unlock_needs_compatible_layer));
         }
     }
 
@@ -15894,10 +15892,8 @@ return true;
 
     private void installerReminderToast() {
         try {
-            runOnUiThread(() -> android.widget.Toast.makeText(this,
-                    "Installing " + installerLabel() + "… follow the installer's prompts if it shows any. "
-                            + "This session closes by itself when it is done.",
-                    android.widget.Toast.LENGTH_LONG).show());
+            runOnUiThread(() -> showToast(this, "Installing " + installerLabel() + "… follow the installer's prompts if it shows any. "
+                            + "This session closes by itself when it is done."));
         } catch (Throwable ignored) {}
     }
 
