@@ -176,14 +176,42 @@ object LinuxComponents {
         return roots
     }
 
-    /** Every Proton tree with a Wine inside. Launch wrappers pointing at another Proton are left out. */
+    /**
+     * The folders Steam itself installed into the libraries, by the installdir its manifests name.
+     * A library folder no manifest names - a copy, a backup, a half-moved install - is not a Proton
+     * any game can be set to.
+     */
+    private fun installedDepotDirs(context: Context): Set<String> {
+        val dirs = HashSet<String>()
+        val steamapps = listOfNotNull(
+            File(steam(context), "steamapps"),
+            LinuxSteamLibrary.cardRoot(context)?.parentFile,
+        )
+        val installdir = Regex("\"installdir\"\\s+\"([^\"]+)\"")
+        for (dir in steamapps) {
+            dir.listFiles { f -> f.name.startsWith("appmanifest_") && f.name.endsWith(".acf") }?.forEach { acf ->
+                runCatching { installdir.find(acf.readText())?.groupValues?.get(1)?.let(dirs::add) }
+            }
+        }
+        return dirs
+    }
+
+    /**
+     * Every Proton a game here can be set to: a tree with a Wine inside that has an ARM64 build
+     * (Valve's x86 Protons cannot run on this device), and, in a library, one Steam installed.
+     * That is Valve's ARM64 depot and the ARM64 GE and CachyOS builds; launch wrappers pointing at
+     * another Proton are left out.
+     */
     @JvmStatic
     fun protons(context: Context): List<Proton> {
         val found = LinkedHashMap<String, Proton>()
+        val installed by lazy { installedDepotDirs(context) }
         for ((base, guestBase, valve) in protonRoots(context)) {
             val entries = base.listFiles()?.sortedBy { it.name } ?: continue
             for (dir in entries) {
                 if (!File(dir, WINE).isDirectory || !File(dir, "proton").isFile) continue
+                if (!File(dir, "$WINE/aarch64-unix").isDirectory) continue
+                if (valve && dir.name !in installed) continue
                 val real = runCatching { dir.canonicalPath }.getOrDefault(dir.path)
                 if (found.containsKey(real)) continue
                 found[real] = Proton(safeName(dir.name), displayName(dir), dir, "$guestBase/${dir.name}", protonVersion(dir), valve)
