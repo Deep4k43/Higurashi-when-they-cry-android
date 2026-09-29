@@ -78,6 +78,9 @@ public final class ExitReasonReporter {
                 sb.append("when      : ").append(fmt.format(new Date(info.getTimestamp()))).append('\n');
                 sb.append("reason    : ").append(reasonName(info.getReason()))
                   .append(" (").append(info.getReason()).append(")\n");
+                sb.append("process   : ").append(String.valueOf(info.getProcessName()))
+                  .append(" (pid ").append(info.getPid()).append(")\n");
+                sb.append("status    : ").append(statusText(info.getReason(), info.getStatus())).append('\n');
                 sb.append("desc      : ").append(String.valueOf(info.getDescription())).append('\n');
                 sb.append("importance: ").append(info.getImportance()).append('\n');
                 sb.append("memory    : pss ").append(info.getPss())
@@ -317,6 +320,41 @@ public final class ExitReasonReporter {
     }
 
     @SuppressLint("NewApi")
+    /**
+     * getStatus() is the signal number for a signaled or native-crash exit and the exit code for a
+     * self exit; other reasons leave it 0. Naming the signal tells an outside kill (SIGKILL/SIGTERM)
+     * apart from a crash (SIGSEGV/SIGABRT/...).
+     */
+    private static String statusText(int reason, int status) {
+        switch (reason) {
+            case ApplicationExitInfo.REASON_SIGNALED:
+            case ApplicationExitInfo.REASON_CRASH_NATIVE:
+                return "signal " + status + " (" + signalName(status) + ")";
+            case ApplicationExitInfo.REASON_EXIT_SELF:
+                return "exit code " + status;
+            default:
+                return String.valueOf(status);
+        }
+    }
+
+    private static String signalName(int signal) {
+        switch (signal) {
+            case 1:  return "SIGHUP";
+            case 2:  return "SIGINT";
+            case 3:  return "SIGQUIT";
+            case 4:  return "SIGILL";
+            case 5:  return "SIGTRAP";
+            case 6:  return "SIGABRT";
+            case 7:  return "SIGBUS";
+            case 8:  return "SIGFPE";
+            case 9:  return "SIGKILL";
+            case 11: return "SIGSEGV";
+            case 13: return "SIGPIPE";
+            case 15: return "SIGTERM";
+            default: return "?";
+        }
+    }
+
     private static String reasonName(int reason) {
         switch (reason) {
             case ApplicationExitInfo.REASON_CRASH:             return "JAVA_CRASH";
