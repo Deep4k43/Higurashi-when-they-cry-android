@@ -11282,3 +11282,7 @@ saves to the same extras and applies live where it can. Commit `94296e8f`, build
 ### 2026-09-29 — Wayland adapter KGSL-poll workaround merged to main `0c3ed798`
 - feat/linux-gamescope-runtime merged (no-ff): bundled adapter 3af78e4, so zero-timeout KGSL polls no longer block (D3D12 demo on Wayland 614 → 4335 fps as an imported driver). Protects users whose Turnip doesn't carry the driver-side fix (Banners-Turnip A8xx 9318c4d).
 - Backup: `refs/backup/20260929/main-before-kgsl-adapter-merge` (= 15d4f73c). Artifacts run 36594541761 (label 3.1.3-main-kgsl), no release.
+
+### 2026-09-29 — 3.1.4 pre-release 1 cut (versionCode 91)
+- Release commit `6a34d1bb` (notes `docs/releases/3.1.4-pre1.md`, README tester section, vc 90 → 91, versionName 3.1.4-pre1) fast-forwarded to main; tag `3.1.4-pre1` pushed on it before dispatch. release.yml run 36601588071, make_prerelease=true.
+- Contents since 3.1.3, Wayland only: one driver pick through the bundled adapter, no tap to start (winhandler bring-to-front), tear-safe zero-copy, the KGSL zero-timeout poll workaround (D3D12). X11 unchanged.
