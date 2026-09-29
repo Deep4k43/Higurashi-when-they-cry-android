@@ -32,6 +32,7 @@ void banner_inject_key(uint32_t evdev, int pressed);
 /* ---- modules → app (JNI upcalls; waylandcomp_jni.c) */
 void banner_on_clipboard_text(const char *utf8, int len);
 void banner_on_text_input(int enabled, const char *program, int x, int y, int w, int h);
+void banner_on_bring_to_front(const char *exe, uint32_t hwnd);  /* have winhandler.exe raise this window */
 
 /* ---- app → modules (callable from any thread; queued to the compositor thread) */
 void banner_host_clipboard_text(const char *utf8, int len);  /* len 0 = clear */

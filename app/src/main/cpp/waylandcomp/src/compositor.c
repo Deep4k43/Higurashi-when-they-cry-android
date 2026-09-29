@@ -322,11 +322,18 @@ volatile int g_ubwc = 1;
  * before the compositor starts. */
 volatile int g_no_render_node;
 
-/* A program window the compositor focuses by itself also gets one synthetic click (auto_activate):
- * in virtual-desktop mode Wine only makes a window foreground on mouse activation. 1 = on (default);
- * BANNER_WAYLAND_AUTO_ACTIVATE=0 in the container's environment turns it off. Set from the app
- * before the compositor starts. */
-volatile int g_auto_activate = 1;
+/* A program window the compositor focuses by itself must also become Wine's FOREGROUND window: in
+ * virtual-desktop mode wl_keyboard.enter does not do it (device-seen 2026-09-28/29). Modes, from
+ * BANNER_WAYLAND_AUTO_ACTIVATE in the container's environment (set from the app before the
+ * compositor starts):
+ *   AUTO_ACTIVATE_BRING_TO_FRONT (default) - ask the app to have winhandler.exe bring the window to
+ *       the front from inside Wine (banner_on_bring_to_front), like the X11 path's DesktopHelper;
+ *   AUTO_ACTIVATE_CLICK ("click") - one synthetic left click on the window instead (auto_activate);
+ *   AUTO_ACTIVATE_OFF ("0") - keyboard focus only. */
+#define AUTO_ACTIVATE_OFF 0
+#define AUTO_ACTIVATE_BRING_TO_FRONT 1
+#define AUTO_ACTIVATE_CLICK 2
+volatile int g_auto_activate = AUTO_ACTIVATE_BRING_TO_FRONT;
 
 /* The panel's refresh rate in mHz, from the app; wl_output advertises it so Wine's display modes
  * carry the real rate (games pick their saved 144 Hz mode, as on X11). 0 = 60 Hz. */
@@ -2608,7 +2615,7 @@ static void keyboard_focus(struct wl_resource *target) {
  *     (tooltips, menus, drop-down lists), which Windows doesn't activate either;
  *   - a window opened BENEATH others (the new window must be the topmost program window);
  *   - while a pointer lock/confine holds (a mouse-look game keeps the input it grabbed);
- *   - while the user is typing: a key in the last 2 s, or an enabled text input (soft keyboard/IME). */
+ *   - while the user is typing: a key in the last 2 s. */
 
 #define FOCUS_MIN_W 200
 #define FOCUS_MIN_H 150
@@ -2654,13 +2661,27 @@ static void activate_window(struct surface *s, const char *why) {
     char name[160];
     describe(s, name, sizeof(name));
     banner_log("window", "focused %s (%s)", name, why);
-    auto_activate_schedule(s);
+    if (g_auto_activate == AUTO_ACTIVATE_BRING_TO_FRONT) {
+        /* winhandler.exe matches the program by its exe name (lower case, as winex11's WM_CLASS gives
+         * it on X11) and prefers the hwnd when it has one (0 = unknown: name only). */
+        char exe[128];
+        const char *prog = client_name(wl_resource_get_client(s->resource));
+        size_t i;
+        for (i = 0; prog[i] && i < sizeof(exe) - 1; i++)
+            exe[i] = (prog[i] >= 'A' && prog[i] <= 'Z') ? (char)(prog[i] + 32) : prog[i];
+        exe[i] = 0;
+        banner_log("window", "bring to front: %s hwnd %#x", exe, s->hwnd);
+        banner_on_bring_to_front(exe, s->hwnd);
+    } else if (g_auto_activate == AUTO_ACTIVATE_CLICK) {
+        auto_activate_schedule(s);
+    }
 }
 
 static void focus_new_window(struct surface *s) {
     if (!focusable_window(s) || topmost_program_window() != s) return;
     if (constraint_active()) return;
-    if (banner_text_input_active()) return;
+    /* No text-input guard: winewayland enables zwp_text_input on every focused window (cursor rect
+     * 0,0 0x0), so "a text input is enabled" is always true; the recent-key test covers typing. */
     if (g_last_key_ns && now_ns() - g_last_key_ns < FOCUS_TYPING_NS && keyboard_focus_held()) return;
     activate_window(s, "new window");
 }
@@ -3147,8 +3168,9 @@ static void pointer_button(uint32_t button, int pressed) {
  * pointer goes back to where it was. The click waits AUTO_ACTIVATE_DELAY_MS (3 s) so Wine's own reaction
  * to the window change settles (explorer takes and drops a pointer lock right after a splash
  * closes), retries while a lock/confine holds, and is dropped when the window is gone or no longer
- * the topmost program window, a text input is enabled, or real input arrived in the last 2 s.
- * Once per window. BANNER_WAYLAND_AUTO_ACTIVATE=0 turns it off (g_auto_activate). */
+ * the topmost program window or real input arrived in the last 2 s. Once per window. Only with
+ * BANNER_WAYLAND_AUTO_ACTIVATE=click (g_auto_activate = AUTO_ACTIVATE_CLICK); the default asks
+ * winhandler.exe to bring the window to the front instead (activate_window). */
 
 #define AUTO_ACTIVATE_DELAY_MS 3000   /* first click: 3 s after the focus change */
 #define AUTO_ACTIVATE_RETRY_MS 150    /* re-check while a pointer lock/confine holds */
@@ -3187,7 +3209,6 @@ static int on_auto_activate_timer(void *data) {
     if (!s) return 0;
     const char *skip = NULL;
     if (!s->mapped || topmost_program_window() != s) skip = "it is no longer the topmost program window";
-    else if (banner_text_input_active()) skip = "a text input is enabled";
     else if (g_last_user_input_ns && now_ns() - g_last_user_input_ns < AUTO_ACTIVATE_QUIET_NS) skip = "the user is giving input";
     else if (constraint_active()) {
         if (++g_auto_activate_tries < AUTO_ACTIVATE_TRIES) {
@@ -3208,7 +3229,7 @@ static int on_auto_activate_timer(void *data) {
 }
 
 static void auto_activate_schedule(struct surface *s) {
-    if (!g_auto_activate || s->auto_activated) return;
+    if (g_auto_activate != AUTO_ACTIVATE_CLICK || s->auto_activated) return;
     if (g_last_user_input_ns && now_ns() - g_last_user_input_ns < AUTO_ACTIVATE_QUIET_NS) return;
     if (!g_auto_activate_timer) {
         g_auto_activate_timer = wl_event_loop_add_timer(wl_display_get_event_loop(g_display),

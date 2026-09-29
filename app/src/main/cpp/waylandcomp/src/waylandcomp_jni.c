@@ -49,6 +49,7 @@ static jmethodID g_on_game_program;  /* static void onGameProgram(int, String) *
 static jmethodID g_on_pointer_lock;  /* static void onPointerLock(boolean, int, int) */
 static jmethodID g_on_clipboard;     /* static void onClipboardText(byte[]) */
 static jmethodID g_on_text_input;    /* static void onTextInput(boolean, String, int, int, int, int) */
+static jmethodID g_on_bring_to_front; /* static void onBringToFront(String, long) */
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
     (void)reserved;
@@ -70,6 +71,9 @@ JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
             g_on_clipboard = (*env)->GetStaticMethodID(env, g_compositor_cls, "onClipboardText", "([B)V");
             g_on_text_input = (*env)->GetStaticMethodID(env, g_compositor_cls, "onTextInput",
                                                         "(ZLjava/lang/String;IIII)V");
+            g_on_bring_to_front = (*env)->GetStaticMethodID(env, g_compositor_cls, "onBringToFront",
+                                                            "(Ljava/lang/String;J)V");
+            if ((*env)->ExceptionCheck(env)) { (*env)->ExceptionClear(env); g_on_bring_to_front = NULL; }
         }
     }
     return JNI_VERSION_1_6;
@@ -160,6 +164,18 @@ void banner_on_clipboard_text(const char *utf8, int len) {
     (*env)->CallStaticVoidMethod(env, g_compositor_cls, g_on_clipboard, arr);
     if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
     (*env)->DeleteLocalRef(env, arr);
+}
+
+/* The compositor focused a program window by itself (new window, the focused one closed): the app
+ * asks winhandler.exe to bring it to the front inside Wine (exe name lower case; hwnd 0 = unknown).
+ * Compositor thread; the Java side only queues. */
+void banner_on_bring_to_front(const char *exe, uint32_t hwnd) {
+    JNIEnv *env;
+    if (!g_compositor_cls || !g_on_bring_to_front || !(env = thread_env())) return;
+    jstring je = (*env)->NewStringUTF(env, exe ? exe : "");
+    (*env)->CallStaticVoidMethod(env, g_compositor_cls, g_on_bring_to_front, je, (jlong)hwnd);
+    if ((*env)->ExceptionCheck(env)) (*env)->ExceptionClear(env);
+    if (je) (*env)->DeleteLocalRef(env, je);
 }
 
 /* A program started (enabled) or stopped accepting IME text; x,y,w,h = its caret rectangle in
@@ -353,12 +369,14 @@ Java_com_winlator_star_wayland_WaylandCompositor_nativeSetUbwc(JNIEnv *env, jcla
     __android_log_print(ANDROID_LOG_INFO, TAG, "compressed (UBWC) game buffers %s", on ? "on" : "off");
 }
 
-/* A window the compositor focuses by itself also gets one synthetic activation click (default on;
- * BANNER_WAYLAND_AUTO_ACTIVATE=0 = off). Set before the compositor starts. */
+/* How a window the compositor focuses by itself is made Wine's foreground window: 1 = winhandler.exe
+ * bring-to-front (default), 2 = one synthetic click, 0 = off (BANNER_WAYLAND_AUTO_ACTIVATE). Set
+ * before the compositor starts. */
 JNIEXPORT void JNICALL
-Java_com_winlator_star_wayland_WaylandCompositor_nativeSetAutoActivate(JNIEnv *env, jclass clazz, jboolean on) {
-    g_auto_activate = on ? 1 : 0;
-    if (!on) __android_log_print(ANDROID_LOG_INFO, TAG, "auto-activation click for new windows off");
+Java_com_winlator_star_wayland_WaylandCompositor_nativeSetAutoActivate(JNIEnv *env, jclass clazz, jint mode) {
+    g_auto_activate = mode;
+    __android_log_print(ANDROID_LOG_INFO, TAG, "activation of windows the compositor focuses: %s",
+                        mode == 0 ? "off" : mode == 2 ? "synthetic click" : "bring to front via winhandler");
 }
 
 /* Debug: name no DRM device in the dma-buf feedback (BANNER_WAYLAND_NO_RENDER_NODE=1), the way a

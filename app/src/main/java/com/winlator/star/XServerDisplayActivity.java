@@ -1549,6 +1549,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     private boolean waylandMode = false;
     // The session runs gamescope in the Linux runtime instead of Wine; the compositor is its display.
     private boolean gamescopeMode = false;
+    // Bumped per compositor bring-to-front request, so a delayed repeat never re-raises an older window.
+    private volatile int waylandBringToFrontSeq = 0;
     /** This Linux session's log folder, for the teardown collection. */
     private File linuxSessionLogDir;
     /** The option files the in-game drawer rewrites while a Linux session runs (LinuxTuning.writeLive). */
@@ -8580,6 +8582,20 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // delivers deltas exactly like Relative Mouse (and captures a physical mouse); when it
         // ends, the X pointer (the absolute input's source) is re-synced to where the compositor's
         // pointer ended up (a SetCursorPos warp, typically), so absolute input resumes from there.
+        // The compositor focused a window by itself (new window / the focused one closed): have
+        // winhandler.exe bring it to the front inside Wine, as DesktopHelper does on every X11 map,
+        // and once more a second later (idempotent) unless a newer window asked meanwhile.
+        com.winlator.star.wayland.WaylandCompositor.setBringToFrontListener((exe, hwnd) -> {
+            final int seq = ++waylandBringToFrontSeq;
+            Log.i("XServerDisplayActivity", "wayland: bring to front: " + exe + " hwnd 0x" + Long.toHexString(hwnd));
+            WinHandler wh = winHandler;
+            if (wh == null) { Log.w("XServerDisplayActivity", "wayland: bring to front: no WinHandler"); return; }
+            wh.bringToFront(exe, hwnd);
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                WinHandler w = winHandler;
+                if (w != null && seq == waylandBringToFrontSeq) w.bringToFront(exe, hwnd);
+            }, 1000L);
+        });
         com.winlator.star.wayland.WaylandCompositor.setPointerLockListener((locked, x, y) -> runOnUiThread(() -> {
             if (xServer == null) return;
             waylandPointerLocked = locked;
@@ -8862,14 +8878,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
             boolean ubwc = !(ub != null && (ub.equals("0") || ub.equalsIgnoreCase("false") || ub.equalsIgnoreCase("off")));
             com.winlator.star.wayland.WaylandCompositor.nativeSetUbwc(ubwc);
             if (!ubwc) Log.i("XServerDisplayActivity", "wayland: compressed (UBWC) game buffers disabled by BANNER_WAYLAND_UBWC");
-            // New program windows get one synthetic activation click (the compositor's auto_activate),
-            // default on; BANNER_WAYLAND_AUTO_ACTIVATE=0 (or false/off) turns it off. Wine sessions only:
-            // in a Linux session the window is gamescope, and a click at its corner would land in Steam.
+            // Windows the compositor focuses by itself are made Wine's foreground window: by default
+            // through winhandler.exe (the X11 path's DesktopHelper does the same on every map), "click"
+            // = one synthetic click instead, 0/false/off = keyboard focus only. Wine sessions only: in a
+            // Linux session the window is gamescope and there is no winhandler.
             String aa = env != null ? env.get("BANNER_WAYLAND_AUTO_ACTIVATE") : null;
-            boolean autoActivate = !gamescopeMode
-                    && !(aa != null && (aa.equals("0") || aa.equalsIgnoreCase("false") || aa.equalsIgnoreCase("off")));
+            int autoActivate = com.winlator.star.wayland.WaylandCompositor.AUTO_ACTIVATE_BRING_TO_FRONT;
+            if (gamescopeMode || (aa != null && (aa.equals("0") || aa.equalsIgnoreCase("false") || aa.equalsIgnoreCase("off"))))
+                autoActivate = com.winlator.star.wayland.WaylandCompositor.AUTO_ACTIVATE_OFF;
+            else if (aa != null && aa.equalsIgnoreCase("click"))
+                autoActivate = com.winlator.star.wayland.WaylandCompositor.AUTO_ACTIVATE_CLICK;
             com.winlator.star.wayland.WaylandCompositor.nativeSetAutoActivate(autoActivate);
-            if (!autoActivate && !gamescopeMode) Log.i("XServerDisplayActivity", "wayland: activation click for new windows disabled by BANNER_WAYLAND_AUTO_ACTIVATE");
+            if (aa != null && !gamescopeMode)
+                Log.i("XServerDisplayActivity", "wayland: BANNER_WAYLAND_AUTO_ACTIVATE=" + aa + " -> mode " + autoActivate);
             // Debug: BANNER_WAYLAND_NO_RENDER_NODE=1 makes the compositor name no DRM device in its
             // dma-buf feedback (main device 0:0), which is what a phone that exposes no /dev/dri
             // node to apps sends. Reproduces those phones' OpenGL path on a device that has one.
