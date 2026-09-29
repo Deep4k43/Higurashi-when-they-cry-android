@@ -11288,3 +11288,9 @@ saves to the same extras and applies live where it can. Commit `94296e8f`, build
 - Contents since 3.1.3, Wayland only: one driver pick through the bundled adapter, no tap to start (winhandler bring-to-front), tear-safe zero-copy, the KGSL zero-timeout poll workaround (D3D12). X11 unchanged.
 - ✅ Published: run 36601588071 green (headSha 6a34d1bb), prerelease, Latest still 3.1.3, tag on 6a34d1bb, update.json vc 91 / 3.1.4-pre1. Released pubg staged at Download/Bannerlator-3.1.4-pre1/ (sha d1c7fc9b…).
 - README tidied on feat branch f19eeb2e (Linux Steam section = 3.1.3 stable, version row 3.1.3 vc90 + 3.1.4-pre1 vc91, adapter note). Not on main yet: main stays = tag 3.1.4-pre1 until the user says merge.
+
+### 2026-09-29 — state after the 3.1.4-pre1 cut
+- main `75057cbe` = tag `3.1.4-pre1` (`6a34d1bb`, vc 91) + README tidy (Linux Steam section and version row match the 3.1.3 stable; adapter note) + log commits. Latest stable is still 3.1.3.
+- Banners-Turnip: KGSL zero-timeout poll fix merged to A8xx `9318c4d`; it ships with the next auto-release. Tester zips are in Download/Turnip-KGSL-poll-FIX-TEST/.
+- AIO Graphics Test: Fusion HUD label during benchmarks fixed on `feat/fullscreen-all` `39afef4` (device-proven, all 8 rows). Not merged to AIO main.
+- Open: step 3 (Wayland trails X11 in the AIO D3D12/D3D10 rows by ~8%/~14%). Next is a cool, paired X11/Wayland rerun with the fixed driver, then profiling if the gap is still there. Results page: Download/turnip-wayland-results.html.
