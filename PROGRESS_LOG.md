@@ -11294,3 +11294,9 @@ saves to the same extras and applies live where it can. Commit `94296e8f`, build
 - Banners-Turnip: KGSL zero-timeout poll fix merged to A8xx `9318c4d`; it ships with the next auto-release. Tester zips are in Download/Turnip-KGSL-poll-FIX-TEST/.
 - AIO Graphics Test: Fusion HUD label during benchmarks fixed on `feat/fullscreen-all` `39afef4` (device-proven, all 8 rows). Not merged to AIO main.
 - Open: step 3 (Wayland trails X11 in the AIO D3D12/D3D10 rows by ~8%/~14%). Next is a cool, paired X11/Wayland rerun with the fixed driver, then profiling if the gap is still there. Results page: Download/turnip-wayland-results.html.
+
+### 2026-09-29 — Turnip r4 released with the KGSL poll fix
+- Banners-Turnip v26.3.0-20260929-r4 (Latest, manual run 36614573201) carries `kgsl-zero-timeout-poll.patch` in every driver type. X11 D3D12 users get the gain by switching to r4 (DX12 demo 378 → 1422 fps on the Pocket FIT). Wayland already had it through the 3.1.4-pre1 adapter.
+- The Turnip repo's README and release notes now list every fix all drivers carry, and why.
+- To do for the next Bannerlator notes: mention r4 for X11 DX12.
+- Housekeeping: stopped three stale background watchers from 09-28. The test zips in Download/Turnip-KGSL-poll-FIX-TEST are superseded by r4.
