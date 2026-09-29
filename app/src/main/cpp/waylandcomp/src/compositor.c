@@ -552,6 +552,10 @@ static void constraints_pointer_gone(struct wl_resource *pointer);
 static void relative_pointers_pointer_gone(struct wl_resource *pointer);
 static void constraints_focus_entered(struct wl_resource *target, struct wl_client *client);
 
+/* Window-manager style activation of new program windows; see "keyboard focus for new windows". */
+static void focus_new_window(struct surface *s);
+static void focus_topmost_if_unfocused(const char *why);
+
 /* ------------------------------------------------------------------ dmabuf buffers */
 
 #define FOURCC(a, b, c, d) \
@@ -657,6 +661,7 @@ static void map_toplevel(struct surface *s) {
     }
     wl_list_insert(g_toplevels.prev, &s->toplevel_link); /* new windows start on top */
     apply_zorder();
+    focus_new_window(s);
 }
 
 static void unmap_toplevel(struct surface *s) {
@@ -671,6 +676,7 @@ static void unmap_toplevel(struct surface *s) {
     wl_list_init(&s->toplevel_link);
     if (g_ime_click == s) g_ime_click = NULL;
     banner_text_input_refocus();
+    focus_topmost_if_unfocused("a window closed");
 }
 
 /* Let go of the surface's dmabuf content. paced = 1: the buffer was replaced, give it back on the
@@ -2446,6 +2452,7 @@ static void seat_get_keyboard(struct wl_client *c, struct wl_resource *r, uint32
     }
     if (wl_resource_get_version(k) >= WL_KEYBOARD_REPEAT_INFO_SINCE_VERSION)
         wl_keyboard_send_repeat_info(k, 25, 500);
+    focus_topmost_if_unfocused("its keyboard arrived after the window");
 }
 static void touch_res_destroy(struct wl_resource *r) {
     for (int i = 0; i < g_ntouches; i++)
@@ -2580,6 +2587,80 @@ static void keyboard_focus(struct wl_resource *target) {
     banner_clipboard_keyboard_focus(client); /* wl_data_device selection follows focus */
 }
 
+/* ------------------------------------------------------------------ keyboard focus for new windows
+ * Keyboard focus used to move only in key_event(), so a window that opened got no wl_keyboard.enter
+ * until the first key or click. winewayland then keeps it inactive, and a game that pauses when it
+ * loses focus (DiRT Showdown: black, muted, ~19 fps) waits for a tap. Like a window manager, a new
+ * program window is activated when it maps, and when the focused window closes (or the program only
+ * binds its wl_keyboard after mapping) the topmost program window left takes over. Left alone:
+ *   - explorer's windows (desktop, taskbar, Start menu: the desktop's process) and small windows
+ *     (tooltips, menus, drop-down lists), which Windows doesn't activate either;
+ *   - a window opened BENEATH others (the new window must be the topmost program window);
+ *   - while a pointer lock/confine holds (a mouse-look game keeps the input it grabbed);
+ *   - while the user is typing: a key in the last 2 s, or an enabled text input (soft keyboard/IME). */
+
+#define FOCUS_MIN_W 200
+#define FOCUS_MIN_H 150
+#define FOCUS_TYPING_NS 2000000000LL
+
+static int64_t g_last_key_ns;               /* when key_event last delivered a key */
+static int constraint_active(void);
+
+static int is_shell_window(const struct surface *s) {
+    return g_desktop && s != g_desktop
+        && wl_resource_get_client(s->resource) == wl_resource_get_client(g_desktop->resource);
+}
+
+static int focusable_window(const struct surface *s) {
+    int w, h;
+    if (!s->mapped || s == g_desktop || s->role != ROLE_TOPLEVEL || is_shell_window(s)) return 0;
+    surface_size(s, &w, &h);
+    return w >= FOCUS_MIN_W && h >= FOCUS_MIN_H;
+}
+
+static struct surface *topmost_program_window(void) {
+    struct surface *s;
+    wl_list_for_each_reverse(s, &g_toplevels, toplevel_link)
+        if (s != g_desktop && !is_shell_window(s)) return s;
+    return NULL;
+}
+
+/* Some wl_keyboard is focused on a live program window or the desktop. */
+static int keyboard_focus_held(void) {
+    for (int i = 0; i < g_nkbs; i++) {
+        struct surface *f = g_kbs[i].focus ? wl_resource_get_user_data(g_kbs[i].focus) : NULL;
+        if (f && (f->mapped || f == g_desktop)) return 1;
+    }
+    return 0;
+}
+
+static void activate_window(struct surface *s, const char *why) {
+    if (!keyboard_for(wl_resource_get_client(s->resource))) return;
+    g_key_target = s;
+    g_ime_click = s;                        /* text input follows the active window, as after a click */
+    keyboard_focus(s->resource);
+    banner_text_input_refocus();
+    char name[160];
+    describe(s, name, sizeof(name));
+    banner_log("window", "focused %s (%s)", name, why);
+}
+
+static void focus_new_window(struct surface *s) {
+    if (!focusable_window(s) || topmost_program_window() != s) return;
+    if (constraint_active()) return;
+    if (banner_text_input_active()) return;
+    if (g_last_key_ns && now_ns() - g_last_key_ns < FOCUS_TYPING_NS && keyboard_focus_held()) return;
+    activate_window(s, "new window");
+}
+
+/* Nothing holds keyboard focus (the focused window closed, or a program's wl_keyboard arrived after
+ * its window mapped): the topmost program window takes it. */
+static void focus_topmost_if_unfocused(const char *why) {
+    if (keyboard_focus_held() || constraint_active()) return;
+    struct surface *s = topmost_program_window();
+    if (s && focusable_window(s)) activate_window(s, why);
+}
+
 /* ------------------------------------------------------------------ pointer constraints
  * zwp_pointer_constraints_v1 and zwp_relative_pointer_manager_v1: what winewayland uses for
  * SetCursorPos, ClipCursor and hidden-cursor (mouse-look) games.
@@ -2613,6 +2694,7 @@ struct constraint {
 };
 static struct wl_list g_constraints;
 static struct constraint *g_active_constraint;
+static int constraint_active(void) { return g_active_constraint != NULL; }
 
 struct relative_pointer {
     struct wl_list link;                    /* g_relative_pointers */
@@ -3215,6 +3297,7 @@ static void key_event(uint32_t evdev, int pressed) {
     struct seat_keyboard *sk;
     if (!keyboard_for(client)) return;
     keyboard_focus(target->resource);
+    g_last_key_ns = now_ns();
     int mods_changed = mods_key(evdev, pressed);
     for_each_keyboard_of(client, sk) {
         wl_keyboard_send_key(sk->kb, wl_display_next_serial(g_display), now_ms(), evdev,

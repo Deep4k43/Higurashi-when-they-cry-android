@@ -17,6 +17,7 @@ void banner_ext_init(struct wl_display *display);           /* creates the globa
 void banner_clipboard_keyboard_focus(struct wl_client *client); /* keyboard focus moved; NULL = none */
 void banner_text_input_refocus(void);                        /* the text-input target may have changed */
 void banner_text_input_surface_gone(struct wl_resource *surface);
+int banner_text_input_active(void);                          /* an enabled text input is focused (the user is typing) */
 
 /* ---- modules → compositor.c */
 const char *banner_client_name(struct wl_client *client);

@@ -8447,6 +8447,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 String name = atm.getDriverName(driverId);
                 String ver = atm.getDriverVersion(driverId);
                 comp = (name == null || name.isEmpty() ? driverId : name) + (ver == null || ver.isEmpty() ? "" : " " + ver);
+                if (com.winlator.star.core.WaylandAdapter.isProprietaryBlob(this, driverId))
+                    comp += " (screen on a bundled Turnip: the blob can't import frames)";
             }
         } catch (Exception e) {
             Log.w("XServerDisplayActivity", "wayland: compositor driver name unavailable", e);
@@ -8454,7 +8456,19 @@ public class XServerDisplayActivity extends AppCompatActivity {
         String game;
         try {
             String choice = com.winlator.star.core.WaylandGameDriver.effectiveChoice(container, shortcut);
-            if (com.winlator.star.core.WaylandGameDriver.isImported(choice)) {
+            if (Container.WAYLAND_GAME_DRIVER_ADAPTER.equals(choice)) {
+                String gdc = (shortcut != null)
+                        ? shortcut.getExtra("graphicsDriverConfig", container.getGraphicsDriverConfig())
+                        : container.getGraphicsDriverConfig();
+                String driverId = com.winlator.star.contentdialog.GraphicsDriverConfigDialog.getVersion(gdc);
+                String why = com.winlator.star.core.WaylandAdapter.unusableReason(this, driverId);
+                if (why == null) game = "adapter on " + comp;
+                else {
+                    String v = com.winlator.star.core.WaylandGameDriver.autoVariantIfKnown();
+                    game = (v == null ? "Auto (by GPU)" : com.winlator.star.core.WaylandGameDriver.variantShortName(v) + " (auto)")
+                            + " - adapter off: " + why;
+                }
+            } else if (com.winlator.star.core.WaylandGameDriver.isImported(choice)) {
                 com.winlator.star.core.WaylandGameDriver.Resolution r =
                         com.winlator.star.core.WaylandGameDriver.resolve(this, choice);
                 game = r.icdPath != null
@@ -8749,7 +8763,13 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     ? shortcut.getExtra("graphicsDriverConfig", container.getGraphicsDriverConfig())
                     : container.getGraphicsDriverConfig();
             String driverId = com.winlator.star.contentdialog.GraphicsDriverConfigDialog.getVersion(gdc);
-            if (driverId != null && !driverId.isEmpty() && !driverId.equals("System")) {
+            if (com.winlator.star.core.WaylandAdapter.isProprietaryBlob(this, driverId)) {
+                // The Qualcomm blob (v819) has no dma-buf import either: same black screen as System
+                // (device-seen 2026-09-25). The pick still stands for the game's side; the compositor
+                // takes the bundled Turnip below instead.
+                Log.w("XServerDisplayActivity", "wayland: " + driverId + " is the proprietary Qualcomm driver, "
+                        + "which cannot import the game's frames; the compositor uses a bundled Turnip");
+            } else if (driverId != null && !driverId.isEmpty() && !driverId.equals("System")) {
                 com.winlator.star.contents.AdrenotoolsManager atm =
                         new com.winlator.star.contents.AdrenotoolsManager(this);
                 driverPath = atm.getDriverPath(driverId);
@@ -12548,12 +12568,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
         adrenotoolsManager.setDriverById(envVars, imageFs, adrenoToolsDriverId);
     }
 
-    // Wayland GAME driver (the adrenotools driver above only feeds the compositor on Wayland: winewayland
-    // sets VK_ICD_FILENAMES itself). Resolve the container's waylandGameDriver extra (shortcut override
-    // first) into the Proton's BANNER_WAYLAND_VK_VARIANT / BANNER_WAYLAND_VK_ICD contract — Auto maps
-    // the device GPU to a bundled variant, imported: hands over an imported Linux ICD (missing import →
-    // Auto, logged). No-op on X11; waylandMode is final by here (gated on the layer above).
-    com.winlator.star.core.WaylandGameDriver.applyToLaunchEnv(this, envVars, container, shortcut, waylandMode);
+    // Wayland GAME driver (winewayland sets VK_ICD_FILENAMES itself). Resolve the container's
+    // waylandGameDriver extra (shortcut override first) into the Proton's BANNER_WAYLAND_VK_VARIANT /
+    // BANNER_WAYLAND_VK_ICD contract — adapter hands over the bundled Wayland adapter, which loads the
+    // adrenotools driver exported just above (so that one pick feeds compositor AND game; System / a
+    // Qualcomm blob → Auto, logged), Auto maps the device GPU to a bundled variant, imported: hands over
+    // an imported Linux ICD (missing import → Auto, logged). No-op on X11; waylandMode is final by here.
+    com.winlator.star.core.WaylandGameDriver.applyToLaunchEnv(this, envVars, container, shortcut, waylandMode,
+            adrenoToolsDriverId);
     // The Task Manager's CONTAINER block was built before this ran (setupUI); now Auto's variant is known.
     if (waylandMode) XServerDialogState.INSTANCE.setTmContainerInfo(buildTmContainerInfo());
 
