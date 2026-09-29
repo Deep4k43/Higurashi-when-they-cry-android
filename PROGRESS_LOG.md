@@ -11300,3 +11300,7 @@ saves to the same extras and applies live where it can. Commit `94296e8f`, build
 - The Turnip repo's README and release notes now list every fix all drivers carry, and why.
 - To do for the next Bannerlator notes: mention r4 for X11 DX12.
 - Housekeeping: stopped three stale background watchers from 09-28. The test zips in Download/Turnip-KGSL-poll-FIX-TEST are superseded by r4.
+
+### 2026-09-29 — Exit reasons: process + signal, merged to main `405f7952`
+- `fix/exit-reason-signal` (`4a76d7ca`, off main) merged no-ff. Each exit record now shows `process : <name> (pid N)` and `status : signal N (SIGKILL…)`, or the exit code for a self exit. Before, a SIGNALED record couldn't tell an outside kill from anything else. Artifacts run 36630899401 green. Backup `refs/backup/20260929/main-before-exit-reason-signal` (= 75057cbe). No release.
+- Why: a vivo iQOO I2221 user (Android 16, app 3.1.3 vc 90) reported "random crashes". Their exit records were all SIGNALED (2), with importance 100/400 and rss 0.2–0.5 GB, on an exact 150 s grid (all at :24/:54). That points to vivo's periodic background killer, not a crash. 3.1.3's only new permission (KILL_BACKGROUND_PROCESSES) runs only in Linux Steam sessions.
