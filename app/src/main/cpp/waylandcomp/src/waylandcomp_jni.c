@@ -33,6 +33,7 @@ extern volatile int g_hide_shell;
 extern volatile int g_zero_copy;
 extern volatile unsigned g_zero_copy_last;
 extern volatile int g_ubwc;
+extern volatile int g_auto_activate;
 extern volatile int g_no_render_node;
 extern volatile int g_output_refresh_mhz;
 extern volatile int g_output_w, g_output_h;
@@ -350,6 +351,14 @@ JNIEXPORT void JNICALL
 Java_com_winlator_star_wayland_WaylandCompositor_nativeSetUbwc(JNIEnv *env, jclass clazz, jboolean on) {
     g_ubwc = on ? 1 : 0;
     __android_log_print(ANDROID_LOG_INFO, TAG, "compressed (UBWC) game buffers %s", on ? "on" : "off");
+}
+
+/* A window the compositor focuses by itself also gets one synthetic activation click (default on;
+ * BANNER_WAYLAND_AUTO_ACTIVATE=0 = off). Set before the compositor starts. */
+JNIEXPORT void JNICALL
+Java_com_winlator_star_wayland_WaylandCompositor_nativeSetAutoActivate(JNIEnv *env, jclass clazz, jboolean on) {
+    g_auto_activate = on ? 1 : 0;
+    if (!on) __android_log_print(ANDROID_LOG_INFO, TAG, "auto-activation click for new windows off");
 }
 
 /* Debug: name no DRM device in the dma-buf feedback (BANNER_WAYLAND_NO_RENDER_NODE=1), the way a

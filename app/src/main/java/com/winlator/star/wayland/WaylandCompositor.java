@@ -217,6 +217,13 @@ public final class WaylandCompositor {
      *  Set before the compositor starts. */
     public static native void nativeSetUbwc(boolean on);
 
+    /** A program window the compositor focuses by itself (a new window, or the one left when the
+     *  focused window closes) also gets one synthetic left click at its top-left interior corner, so
+     *  Wine's mouse activation makes it foreground (a game that pauses unfocused starts without a
+     *  tap). Default on; BANNER_WAYLAND_AUTO_ACTIVATE=0 in the environment variables turns it off.
+     *  Set before the compositor starts. */
+    public static native void nativeSetAutoActivate(boolean on);
+
     /** Debug: advertise no DRM device (main device 0:0) in the dma-buf feedback, as a phone that
      *  exposes no /dev/dri node to apps does. BANNER_WAYLAND_NO_RENDER_NODE=1 in the container's or
      *  shortcut's environment variables. Set before the compositor starts. */

@@ -8862,6 +8862,14 @@ public class XServerDisplayActivity extends AppCompatActivity {
             boolean ubwc = !(ub != null && (ub.equals("0") || ub.equalsIgnoreCase("false") || ub.equalsIgnoreCase("off")));
             com.winlator.star.wayland.WaylandCompositor.nativeSetUbwc(ubwc);
             if (!ubwc) Log.i("XServerDisplayActivity", "wayland: compressed (UBWC) game buffers disabled by BANNER_WAYLAND_UBWC");
+            // New program windows get one synthetic activation click (the compositor's auto_activate),
+            // default on; BANNER_WAYLAND_AUTO_ACTIVATE=0 (or false/off) turns it off. Wine sessions only:
+            // in a Linux session the window is gamescope, and a click at its corner would land in Steam.
+            String aa = env != null ? env.get("BANNER_WAYLAND_AUTO_ACTIVATE") : null;
+            boolean autoActivate = !gamescopeMode
+                    && !(aa != null && (aa.equals("0") || aa.equalsIgnoreCase("false") || aa.equalsIgnoreCase("off")));
+            com.winlator.star.wayland.WaylandCompositor.nativeSetAutoActivate(autoActivate);
+            if (!autoActivate && !gamescopeMode) Log.i("XServerDisplayActivity", "wayland: activation click for new windows disabled by BANNER_WAYLAND_AUTO_ACTIVATE");
             // Debug: BANNER_WAYLAND_NO_RENDER_NODE=1 makes the compositor name no DRM device in its
             // dma-buf feedback (main device 0:0), which is what a phone that exposes no /dev/dri
             // node to apps sends. Reproduces those phones' OpenGL path on a device that has one.
