@@ -7,11 +7,14 @@ import android.content.Context;
 import android.os.Build;
 import android.util.Log;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
+import java.util.ArrayDeque;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -46,6 +49,8 @@ public final class ExitReasonReporter {
     private static final int MAX_RECORDS = 8;
     private static final int MAX_FRAMES = 64;          // per thread
     private static final int MAX_TRACE_BYTES = 2 * 1024 * 1024;
+    /** Log lines kept from the process that exited last (its final moments). */
+    private static final int DEAD_PROCESS_LINES = 400;
 
     private ExitReasonReporter() {}
 
@@ -376,6 +381,53 @@ public final class ExitReasonReporter {
         }
     }
 
+    /**
+     * The last lines the most recently exited process wrote, read back from Android's log buffers by
+     * its pid. The app's own logcat capture only covers the running process, so after a kill and a
+     * relaunch the lines leading up to the exit would otherwise be lost. Android keeps them only
+     * until the buffer rotates, so this works best when the app is reopened soon after it closed.
+     * An app can only read its own log lines, so this stays Bannerlator-only.
+     */
+    @SuppressLint("NewApi") // only reached from captureToFile, which checks isSupported()
+    private static String lastExitLogcat(Context context) {
+        try {
+            ActivityManager am = (ActivityManager) context.getSystemService(Context.ACTIVITY_SERVICE);
+            List<ApplicationExitInfo> infos =
+                    am.getHistoricalProcessExitReasons(context.getPackageName(), 0, 1);
+            if (infos == null || infos.isEmpty()) return "";
+            ApplicationExitInfo info = infos.get(0);
+            int pid = info.getPid();
+            if (pid <= 0 || pid == android.os.Process.myPid()) return "";
+
+            ArrayDeque<String> tail = new ArrayDeque<>(DEAD_PROCESS_LINES);
+            Process p = Runtime.getRuntime().exec(
+                    new String[] {"logcat", "-d", "-b", "main,system,crash", "--pid=" + pid});
+            try (BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream()))) {
+                String line;
+                while ((line = r.readLine()) != null) {
+                    if (tail.size() == DEAD_PROCESS_LINES) tail.removeFirst();
+                    tail.addLast(LogcatCapture.redact(line));
+                }
+            }
+            p.destroy();
+
+            StringBuilder sb = new StringBuilder();
+            sb.append("\n=== last log lines of the process that exited: ")
+              .append(String.valueOf(info.getProcessName())).append(" (pid ").append(pid).append(") ===\n");
+            if (tail.isEmpty()) {
+                sb.append("(Android no longer holds log lines for this pid. They rotate out quickly, "
+                        + "so reopen the app soon after it closes.)\n");
+            } else {
+                for (String line : tail) sb.append(line).append('\n');
+            }
+            return sb.toString();
+        } catch (Throwable t) {
+            Log.w(TAG, "could not read the exited process's log lines", t);
+            return "\n=== last log lines of the process that exited: could not read ("
+                    + t.getMessage() + ") ===\n";
+        }
+    }
+
     /** Where the exit-reason reports are filed: {@code <log dir>/exit-reasons/}. */
     public static File folder(Context context) {
         File dir = new File(LogLocation.resolveLogDir(context), FOLDER);
@@ -391,7 +443,8 @@ public final class ExitReasonReporter {
         if (!isSupported()) return null;
         try {
             File out = new File(folder(context), "exit-reasons-" + LogcatCapture.timestamp() + ".log");
-            FileUtils.writeString(out, LogcatCapture.deviceHeader(context) + capture(context));
+            FileUtils.writeString(out, LogcatCapture.deviceHeader(context) + capture(context)
+                    + lastExitLogcat(context));
             return out;
         } catch (Throwable t) {
             Log.w(TAG, "could not write exit-reasons file", t);
