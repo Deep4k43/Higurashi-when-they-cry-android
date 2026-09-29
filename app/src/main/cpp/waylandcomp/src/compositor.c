@@ -3144,13 +3144,14 @@ static void pointer_button(uint32_t button, int pressed) {
  * window the compositor focuses by itself (focus_new_window / focus_topmost_if_unfocused) also gets
  * ONE left click, delivered exactly like a tap (pointer_input: the desktop surface in desktop mode,
  * else the window under the point) at the window's top-left interior corner (x+2, y+2), and the
- * pointer goes back to where it was. The click waits AUTO_ACTIVATE_DELAY_MS so Wine's own reaction
+ * pointer goes back to where it was. The click waits AUTO_ACTIVATE_DELAY_MS (3 s) so Wine's own reaction
  * to the window change settles (explorer takes and drops a pointer lock right after a splash
  * closes), retries while a lock/confine holds, and is dropped when the window is gone or no longer
  * the topmost program window, a text input is enabled, or real input arrived in the last 2 s.
  * Once per window. BANNER_WAYLAND_AUTO_ACTIVATE=0 turns it off (g_auto_activate). */
 
-#define AUTO_ACTIVATE_DELAY_MS 150
+#define AUTO_ACTIVATE_DELAY_MS 3000   /* first click: 3 s after the focus change */
+#define AUTO_ACTIVATE_RETRY_MS 150    /* re-check while a pointer lock/confine holds */
 #define AUTO_ACTIVATE_TRIES 8
 #define AUTO_ACTIVATE_QUIET_NS 2000000000LL
 
@@ -3190,7 +3191,7 @@ static int on_auto_activate_timer(void *data) {
     else if (g_last_user_input_ns && now_ns() - g_last_user_input_ns < AUTO_ACTIVATE_QUIET_NS) skip = "the user is giving input";
     else if (constraint_active()) {
         if (++g_auto_activate_tries < AUTO_ACTIVATE_TRIES) {
-            wl_event_source_timer_update(g_auto_activate_timer, AUTO_ACTIVATE_DELAY_MS);
+            wl_event_source_timer_update(g_auto_activate_timer, AUTO_ACTIVATE_RETRY_MS);
             return 0;
         }
         skip = "a pointer lock/confine holds";
