@@ -11278,3 +11278,7 @@ saves to the same extras and applies live where it can. Commit `94296e8f`, build
 ## 2026-09-29 — Fusion HUD API label during AIO benchmarks
 - The HUD showed "D3D11 · DXVK" on every AIO sweep row. The host side (readAppDeclaredApi → hud_active_api.json, P1 of startDxApiDetection) works on X11 and Wayland. The AIO never wrote the file during benchmarks: rows run under the Benchmark tool page and the publisher skipped tool pages. Fixed in AIO `feat/fullscreen-all` 39afef4 (no app change).
 - KGSL poll fix: Wayland ABAB shows no regression; report committed in Banners-Turnip 51989a7.
+
+### 2026-09-29 — Wayland adapter KGSL-poll workaround merged to main `0c3ed798`
+- feat/linux-gamescope-runtime merged (no-ff): bundled adapter 3af78e4, so zero-timeout KGSL polls no longer block (D3D12 demo on Wayland 614 → 4335 fps as an imported driver). Protects users whose Turnip doesn't carry the driver-side fix (Banners-Turnip A8xx 9318c4d).
+- Backup: `refs/backup/20260929/main-before-kgsl-adapter-merge` (= 15d4f73c). Artifacts run 36594541761 (label 3.1.3-main-kgsl), no release.
