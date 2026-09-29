@@ -111,6 +111,7 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [🤖 AI Disclaimer](#-ai-disclaimer)
 - [ℹ️ Information](#ℹ️-information)
 - [🐛 Report a Mali GPU Issue](#-report-a-mali-gpu-game-issue)
+- [🧪 3.1.4 pre-release 1 (testers): Wayland](#-314-pre-release-1-testers-wayland)
 - [🐧 Linux Steam Client (3.1.3 pre-release)](#-linux-steam-client--313-pre-release-testers)
 - [🆕 What's New in 3.1.2](#-whats-new-in-312)
 - [🎞️ Frame Generation & Present Modes](#-frame-generation--present-modes)
@@ -124,6 +125,10 @@ Every report gets its own **public discussion thread**. You can reply as the ori
 - [📄 License](#-license)
 
 ---
+
+## 🧪 3.1.4 pre-release 1 (testers): Wayland
+
+**[3.1.4 pre-release 1](https://github.com/The412Banner/Bannerlator/releases/tag/3.1.4-pre1) makes the Wayland display mode easier and faster.** Wayland now runs games on the same Turnip driver you pick for X11, through a built-in adapter, so there's one driver choice. Games start without tapping the screen, zero-copy no longer shows half-drawn frames, and DirectX 12 on Wayland is no longer capped by a driver wait (a small DirectX 12 test went from about 600 to over 4,000 fps). X11 is unchanged. It's a **tester pre-release**: you're only offered it in-app with **Settings → Include pre-releases** switched on. Full details are in the [release notes](docs/releases/3.1.4-pre1.md).
 
 ## 🐧 Linux Steam Client — 3.1.3 pre-release (testers)
 
