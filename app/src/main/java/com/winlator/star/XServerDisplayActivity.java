@@ -2797,7 +2797,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         }
 
         // DirectAudio's winedirectaudio.drv only loads on the arm64ec Proton builds listed in
-        // DirectAudioSupport.SUPPORTED_BUILD_TOKENS (7 as of driver v1.3.2); on
+        // DirectAudioSupport.SUPPORTED_BUILD_TOKENS (8 tokens as of driver v1.3.2); on
         // any other layer it does nothing / breaks audio. The editors grey it out and coerce it on save,
         // but a container/shortcut written before this gate (or whose layer was swapped elsewhere) can
         // still arrive here as "directaudio" — the last place it could be applied to the guest registry.

@@ -6565,7 +6565,7 @@ internal fun ShortcutSettingsDialogScreen(
     var perfExpanded by rememberSaveable { mutableStateOf(false) }
 
     // Audio driver. DirectAudio only loads on the arm64ec Proton builds in
-    // DirectAudioSupport.SUPPORTED_BUILD_TOKENS (7 as of driver v1.3.2); a shortcut
+    // DirectAudioSupport.SUPPORTED_BUILD_TOKENS (8 tokens as of driver v1.3.2); a shortcut
     // can't override the Wine version (container-only), so support is fixed by the container's layer.
     // Grey the option out off those layers and coerce a stale saved pick back to the default so the
     // dropdown never shows an unselectable value as selected.

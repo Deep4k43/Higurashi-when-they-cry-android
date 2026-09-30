@@ -930,7 +930,7 @@ class ContainerDetailViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * DirectAudio only loads on the arm64ec Proton builds in DirectAudioSupport.SUPPORTED_BUILD_TOKENS
-     * (7 as of driver v1.3.2); on any other layer it does
+     * (8 tokens as of driver v1.3.2); on any other layer it does
      * nothing / breaks audio. So it must never survive as the chosen driver on an unsupported layer:
      * if the currently-selected driver is DirectAudio but [selectedWineVersion] isn't one of those
      * builds, fall back to the app default (PulseAudio). Called on load, on a Wine-version change, and
