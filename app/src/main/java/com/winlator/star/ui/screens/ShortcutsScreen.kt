@@ -6330,6 +6330,37 @@ internal fun ShortcutSettingsDialogScreen(
         Container.DISPLAY_BACKEND_X11 -> false
         else -> containerWaylandDefault
     }
+    // Sync per-game override (extra "syncMode"; core.SyncSupport). null = follow the container. The
+    // stored value is the extra, else what this game's own env string said before the selector
+    // existed (WINEESYNC=0 → wineserver, WINENTSYNC=1 → ntsync, WINEESYNC=1 → esync). Greyed against
+    // the layer the game runs on — the container's (a shortcut has no layer of its own); the probe
+    // reads ntdll.so off-main and is cached per layer, so it's keyed on the wine version.
+    val syncLayer = shortcut.container.wineVersion ?: ""
+    val containerSyncStored = remember(shortcut.container) {
+        com.winlator.star.core.SyncSupport.storedMode(
+            shortcut.container.getExtra(com.winlator.star.core.SyncMode.EXTRA, ""), shortcut.container.envVars)
+    }
+    var syncCaps by remember(syncLayer) { mutableStateOf(com.winlator.star.core.SyncSupport.peek(syncLayer)) }
+    LaunchedEffect(syncLayer) {
+        if (isLinuxEntry) return@LaunchedEffect
+        syncCaps = withContext(Dispatchers.IO) {
+            com.winlator.star.core.SyncSupport.capsFor(context, null, syncLayer)
+        }
+    }
+    var syncOverride by remember {
+        mutableStateOf(com.winlator.star.core.SyncSupport.storedMode(
+            shortcut.getExtra(com.winlator.star.core.SyncMode.EXTRA, ""), shortcut.getExtra("envVars")))
+    }
+    val containerSyncEffective = syncCaps?.resolve(containerSyncStored)
+        ?: containerSyncStored ?: com.winlator.star.core.SyncMode.ESYNC
+    val syncEffective = syncOverride?.let { o -> syncCaps?.resolve(o) ?: o } ?: containerSyncEffective
+    val syncOverriding = syncOverride != null && syncEffective != containerSyncEffective
+    val syncOverrideUnavailable = syncOverride != null && syncCaps?.isAvailable(syncOverride!!) == false
+    val pickSync: (String) -> Unit = { m ->
+        if (syncCaps?.isAvailable(m) != false && com.winlator.star.core.SyncMode.normalize(m) != null)
+            syncOverride = if (m == containerSyncEffective) null else m
+    }
+
     // Wayland GAME driver override (per-game, same extra name as the container's): "" = the
     // container's choice. Only shown when the effective backend is Wayland; see core.WaylandGameDriver.
     var waylandGameDriverOverride by remember { mutableStateOf(shortcut.getExtra("waylandGameDriver", "")) }
@@ -6732,7 +6763,13 @@ internal fun ShortcutSettingsDialogScreen(
 
     // Env vars live in dialog-level state (not in the tab) so switching tabs can't drop
     // in-progress edits; written back to the shortcut's extras in save() below.
-    var envVarsStr by remember { mutableStateOf(shortcut.getExtra("envVars")) }
+    // The sync variables left the env string for the Sync selector (read into syncOverride above),
+    // so they're dropped here and on save; a Linux entry's env is handed back untouched.
+    var envVarsStr by remember {
+        mutableStateOf(shortcut.getExtra("envVars").let {
+            if (isLinuxEntry) it else com.winlator.star.core.SyncSupport.stripSyncVars(it)
+        })
+    }
     var showScAudioSettings by remember { mutableStateOf(false) }
     // The game's folder on the Android side, derived from the shortcut's Exec= path, so the
     // editor can look for DLLs the game ships. Null when the drive letter isn't mapped.
@@ -6911,7 +6948,7 @@ internal fun ShortcutSettingsDialogScreen(
         if (enableDInput) finalInputType = finalInputType or WinHandler.FLAG_INPUT_TYPE_DINPUT.toInt()
 
         val wincomps = winComponents.joinToString(",") { "${it.key}=${it.selectedIndex}" }
-        val envVars = envVarsStr
+        val envVars = if (isLinuxEntry) envVarsStr else com.winlator.star.core.SyncSupport.stripSyncVars(envVarsStr)
         val cpuList = cpuListViewRef.value?.getCheckedCPUListAsString() ?: shortcut.getExtra("cpuList", shortcut.container.getCPUList(true))
         val linuxClientCpuList = linuxClientCpuListViewRef.value?.getCheckedCPUListAsString()
             ?: shortcut.getExtra("linuxClientCpuList", shortcut.container.getCPUList(true))
@@ -7032,6 +7069,12 @@ internal fun ShortcutSettingsDialogScreen(
             putExtra("reshadeEffect", reshadeLoadout.firstEffectName())
             putExtra("wincomponents", wincomps)
             putExtra("envVars", envVars.ifEmpty { null })
+            // Sync override: only a pick that differs from the container's is stored (null clears the
+            // extra = follow the container). A pick the layer can't run saves as what it resolves to.
+            if (!isLinuxEntry) {
+                putExtra(com.winlator.star.core.SyncMode.EXTRA,
+                    syncOverride?.let { o -> syncCaps?.resolve(o) ?: o }?.takeIf { it != containerSyncEffective })
+            }
             putExtra("cpuList", cpuList)
             // Only a Linux entry draws the two pickers, so only a Linux entry writes their keys — a
             // Wine shortcut keeps exactly the extras it had.
@@ -7092,7 +7135,7 @@ internal fun ShortcutSettingsDialogScreen(
                 add("selectIcon")
                 // The Wine/X11 graphics stack is not registered for a Linux entry, so the D-pad
                 // cursor can never land on a row that isn't drawn (see the render conditionals).
-                if (!isLinuxEntry) add("displayBackend")
+                if (!isLinuxEntry) { add("syncMode"); add("displayBackend") }
                 add("gfxDriver")   // the compositor driver: live on the gamescope path too
                 if (effectiveWaylandShortcut && !isLinuxEntry) {
                     add("waylandAdvanced"); add("waylandDriverCfg")
@@ -7496,6 +7539,34 @@ internal fun ShortcutSettingsDialogScreen(
                     // reused verbatim so the per-game editor's terms match the container's.
                     TextButton(onClick = { glossaryQuery = "" }) {
                         Text("❔  What is all this?")
+                    }
+
+                    // Sync (esync / ntsync / fsync / wineserver) — follows the container unless this game
+                    // picks otherwise. D-pad: Left/Right step through the runnable modes, A goes back
+                    // to the container's. Not for a Linux entry: no Wine of ours runs there.
+                    if (!isLinuxEntry) {
+                        val runnable = com.winlator.star.core.SyncMode.ALL.filter { syncCaps?.isAvailable(it) ?: (it != com.winlator.star.core.SyncMode.FSYNC && it != com.winlator.star.core.SyncMode.NTSYNC) }
+                        SideEffect {
+                            dp.actions["syncMode"] = ControlActions(
+                                activate = { syncOverride = null },
+                                onLeft = { runnable.getOrNull(runnable.indexOf(syncEffective) - 1)?.let(pickSync) },
+                                onRight = { runnable.getOrNull(runnable.indexOf(syncEffective) + 1)?.let(pickSync) },
+                            )
+                        }
+                        com.winlator.star.ui.components.SyncModeSelector(
+                            selected = syncEffective,
+                            caps = syncCaps,
+                            helper = when {
+                                syncOverrideUnavailable && syncCaps != null ->
+                                    com.winlator.star.ui.components.syncSwitchedBackNotice(syncOverride!!, syncLayer, syncCaps!!)
+                                syncOverriding -> "$syncEffective for this game only (container: $containerSyncEffective)."
+                                else -> "Following the container: $containerSyncEffective."
+                            },
+                            onPick = pickSync,
+                            focused = dp.isFocused("syncMode"),
+                            onUseContainer = if (syncOverriding) ({ syncOverride = null }) else null,
+                            modifier = Modifier.dpadBringIntoView(dp, "syncMode"),
+                        )
                     }
 
                     // Display backend override (per-game): default to the container, or force
