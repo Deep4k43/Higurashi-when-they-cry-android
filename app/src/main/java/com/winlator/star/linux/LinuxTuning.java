@@ -58,7 +58,7 @@ public final class LinuxTuning {
     public static final String EXTRA_STEAM_BUTTONS = "linuxSteamButtons";
     /** Two Back presses within half a second open Steam's Quick Access Menu; one still opens the drawer. On unless turned off. */
     public static final String EXTRA_DOUBLE_BACK_QAM = "linuxDoubleBackQam";
-    /** PROTON_USE_XALIA=0 for the games the client starts. Off unless turned on. */
+    /** PROTON_USE_XALIA=0 for the games the client starts. On unless turned off. */
     public static final String EXTRA_NO_XALIA = "linuxNoXalia";
     /** PROOT_NO_SECCOMP=1: proot traces every system call itself instead of filtering them with seccomp. Off unless turned on. */
     public static final String EXTRA_PROOT_NO_SECCOMP = "linuxProotNoSeccomp";
@@ -100,12 +100,13 @@ public final class LinuxTuning {
      * and the virtual pad it hands the game never arrives. Its scaling is offered on its own instead
      * ({@link #EXTRA_SCALER}, {@link #EXTRA_FILTER}); a frame cap is the in-game drawer's FPS limit.
      * Only {@code -steamdeck} is passed and never {@code -steamos3}; the session script says why.
-     * The two troubleshooting switches ({@link #EXTRA_NO_XALIA}, {@link #EXTRA_PROOT_NO_SECCOMP}) are
-     * off: each takes away something Valve or proot does on purpose, for a device where it misbehaves.
+     * {@link #EXTRA_PROOT_NO_SECCOMP} is off: it takes away something proot does on purpose, for a device where it misbehaves.
+     * {@link #EXTRA_NO_XALIA} is on, so xalia is skipped unless the entry turns the switch off.
+     * xalia is an x86 program Proton starts beside every game for gamepad navigation the session already has, and under FEX it costs each game a slice of a core (about 10% of one beside Once Upon a KATAMARI on an SD 8 Gen 2).
+     * It also crash-looped one Galaxy Fold at start. (From Droid-Deck/DroidDeck #85.)
      */
     public static boolean defaultOn(String extra) {
         return !EXTRA_STEAMDECK.equals(extra)
-                && !EXTRA_NO_XALIA.equals(extra)
                 && !EXTRA_PROOT_NO_SECCOMP.equals(extra);
     }
 
