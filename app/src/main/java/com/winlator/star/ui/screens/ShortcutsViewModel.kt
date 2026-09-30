@@ -57,6 +57,7 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.util.Collections
+import com.winlator.star.androidgames.AndroidGames
 import com.winlator.star.linux.LinuxShortcuts
 
 enum class ShortcutSortOrder { NAME_ASC, NAME_DESC, CONTAINER }
@@ -1025,6 +1026,29 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
                 Log.e(TAG, "Bulk import failed for ${c.name}", e)
                 failures += "${c.name}: ${e.message ?: e.javaClass.simpleName}"
             }
+        }
+        refresh()
+        return BulkImportSummary(added, failures.size, failures)
+    }
+
+    /**
+     * Writes a Games-list entry for each picked Android app. They go in the container the "+" flow
+     * already chose (else the first one) only because the Games list is read from container desktop
+     * dirs; the container is never started for them. Blocking — call from a background dispatcher.
+     */
+    fun addAndroidGames(
+        containerIndex: Int,
+        apps: List<AndroidGames.InstalledApp>,
+        context: Context,
+    ): BulkImportSummary {
+        val containers = liveContainers()
+        val container = containers.getOrNull(containerIndex) ?: containers.firstOrNull()
+            ?: return BulkImportSummary(0, apps.size, listOf("Create a container first — the Games list lives in one."))
+        var added = 0
+        val failures = mutableListOf<String>()
+        for (app in apps) {
+            if (AndroidGames.addToShortcuts(context, container, app) != null) added++
+            else failures += "${app.label}: couldn't write the shortcut"
         }
         refresh()
         return BulkImportSummary(added, failures.size, failures)
