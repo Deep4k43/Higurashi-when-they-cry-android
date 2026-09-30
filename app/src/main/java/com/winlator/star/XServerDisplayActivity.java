@@ -5340,7 +5340,16 @@ public class XServerDisplayActivity extends AppCompatActivity {
         stopDxApiDetection();
         // Stop the session foreground service (also removes its ongoing notification).
         stopService(new Intent(this, com.winlator.star.core.GameSessionForegroundService.class));
-        preloaderDialog.showOnUiThread(R.string.shutdown);
+        if (gamescopeMode) {
+            // The Linux loading watcher stops here and not only in onDestroy.
+            // Left running, it rewrote this screen every half second with the session log's last startup milestone, its start hints and a clock counted from the launch.
+            // A pass already under way cannot undo that either: the closing screen refuses progress updates, and the restart branch checks this flag.
+            linuxSessionWatchStop = true;
+            com.winlator.star.core.PreloaderState.showLinuxSteamClosing(
+                    getString(R.string.linux_steam_closing), getString(R.string.linux_steam_closing_hint));
+        } else {
+            preloaderDialog.showOnUiThread(R.string.shutdown);
+        }
         final Runnable teardown = new Runnable() {
             @Override
             public void run() {
@@ -5486,7 +5495,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         final File steamStopDir = linuxLiveDir;
         if (linuxLauncher != null && steamStopDir != null && linuxLauncher.steamStopArmed(steamStopDir)) {
             final long teardownAt = android.os.SystemClock.uptimeMillis() + 1000;
-            preloaderDialog.hint("Closing the Steam client…");
+            preloaderDialog.hint(getString(R.string.linux_steam_closing_saving_hint));
             new Thread(() -> {
                 try {
                     linuxLauncher.askSteamToExit(steamStopDir);
@@ -9152,6 +9161,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
             String restartSeen = null;
             while (!linuxSessionWatchStop) {
                 try { Thread.sleep(500); } catch (InterruptedException e) { return; }
+                // The session may have begun closing during the nap; nothing from here on belongs on the closing screen.
+                if (linuxSessionWatchStop) return;
                 boolean up = preloaderDialog != null && preloaderDialog.isShowing();
                 if (up && !winStarted && System.currentTimeMillis() > deadline) {
                     Log.w("XServerDisplayActivity", "Linux session: no first frame after 10 min; uncovering the session");
@@ -9171,8 +9182,10 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     loading.restartClock();
                     deadline = System.currentTimeMillis() + 10 * 60 * 1000L;
                     runOnUiThread(() -> {
+                        // Checked again on the main thread, where exit() sets it, so a close that began after the log read still wins.
+                        if (linuxSessionWatchStop) return;
                         winStarted = false;
-                        com.winlator.star.core.PreloaderState.show("Steam is restarting once…");
+                        com.winlator.star.core.PreloaderState.showLinuxSteam("Steam is restarting once…");
                         try { com.winlator.star.wayland.WaylandCompositor.nativeResetFirstFrame(); }
                         catch (Throwable e) { Log.w("XServerDisplayActivity", "first-frame re-arm unavailable", e); }
                     });
@@ -9879,7 +9892,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // The watcher's 10-minute deadline covers a session that never presents.
         // (No startLaunchTimers here: its shader-compile hints are for Wine launches, and the
         // loading screen rotates its own.)
-        com.winlator.star.core.PreloaderState.show("Steam is starting…");
+        com.winlator.star.core.PreloaderState.showLinuxSteam("Steam is starting…");
         winHandler.start();
     }
 
@@ -9902,7 +9915,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             Log.i("XServerDisplayActivity", "Linux session: placing " + name + " before the client's first start");
             // The centered status card, the same one the session's own milestones drive once it
             // is running; linuxProgress writes to nothing else.
-            com.winlator.star.core.PreloaderState.show("Downloading " + name + "…");
+            com.winlator.star.core.PreloaderState.showLinuxSteam("Downloading " + name + "…");
             final long startedAt = android.os.SystemClock.elapsedRealtime();
             final String hint = "Once only · the Steam client keeps it up to date from here on";
             com.winlator.star.linux.LinuxSteamSeed.Entry entry = com.winlator.star.linux.LinuxSteamSeed.fetchProton();
