@@ -9172,7 +9172,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     deadline = System.currentTimeMillis() + 10 * 60 * 1000L;
                     runOnUiThread(() -> {
                         winStarted = false;
-                        com.winlator.star.core.PreloaderState.show("Steam is restarting once…");
+                        com.winlator.star.core.PreloaderState.showLinuxSteam("Steam is restarting once…");
                         try { com.winlator.star.wayland.WaylandCompositor.nativeResetFirstFrame(); }
                         catch (Throwable e) { Log.w("XServerDisplayActivity", "first-frame re-arm unavailable", e); }
                     });
@@ -9879,7 +9879,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // The watcher's 10-minute deadline covers a session that never presents.
         // (No startLaunchTimers here: its shader-compile hints are for Wine launches, and the
         // loading screen rotates its own.)
-        com.winlator.star.core.PreloaderState.show("Steam is starting…");
+        com.winlator.star.core.PreloaderState.showLinuxSteam("Steam is starting…");
         winHandler.start();
     }
 
@@ -9902,7 +9902,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             Log.i("XServerDisplayActivity", "Linux session: placing " + name + " before the client's first start");
             // The centered status card, the same one the session's own milestones drive once it
             // is running; linuxProgress writes to nothing else.
-            com.winlator.star.core.PreloaderState.show("Downloading " + name + "…");
+            com.winlator.star.core.PreloaderState.showLinuxSteam("Downloading " + name + "…");
             final long startedAt = android.os.SystemClock.elapsedRealtime();
             final String hint = "Once only · the Steam client keeps it up to date from here on";
             com.winlator.star.linux.LinuxSteamSeed.Entry entry = com.winlator.star.linux.LinuxSteamSeed.fetchProton();

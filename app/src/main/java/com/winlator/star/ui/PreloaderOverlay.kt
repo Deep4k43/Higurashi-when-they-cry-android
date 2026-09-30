@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -87,7 +88,9 @@ fun PreloaderOverlay() {
 
     // Centered status/shutdown screen — calm logo + message + slim indeterminate bar.
     if (ui.centered) {
-        CenteredStatus(ui.tailLabel.ifEmpty { ui.title }, ui.hint, ui.elapsed, ui.percent)
+        val message = ui.tailLabel.ifEmpty { ui.title }
+        if (ui.linuxSteam) LinuxSteamStatus(message, ui.hint, ui.elapsed, ui.percent)
+        else CenteredStatus(message, ui.hint, ui.elapsed, ui.percent)
         return
     }
 
@@ -321,69 +324,118 @@ private fun CenteredStatus(message: String, subMessage: String? = null, elapsed:
                     )
                 ),
         )
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
+        StatusReadout(
+            message, subMessage, elapsed, percent,
+            Modifier.align(Alignment.BottomCenter).windowInsetsPadding(WindowInsets.safeDrawing),
+        )
+    }
+}
+
+/**
+ * The Linux Steam session's loading screen: plain black, with the Steam (Linux) entry's own art centered above the same readout as [CenteredStatus].
+ * The art is the capsule the entry's games-list card and cover use (R.drawable.steam_tile).
+ * Its ground is pure black, so it sits on the page without a visible edge.
+ */
+@Composable
+private fun LinuxSteamStatus(message: String, subMessage: String?, elapsed: String?, percent: Int) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black)
+            .windowInsetsPadding(WindowInsets.safeDrawing),
+    ) {
+        // The art takes whatever height the readout leaves, keeping its aspect ratio.
+        // Capped in width so it stays a logo on a tablet, and shrunk by height in landscape.
+        Box(
+            contentAlignment = Alignment.Center,
             modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .padding(horizontal = 28.dp)
-                .padding(bottom = 46.dp),
+                .weight(1f)
+                .fillMaxWidth()
+                .padding(16.dp),
         ) {
-            if (message.isNotEmpty()) {
+            Image(
+                painter = painterResource(R.drawable.steam_tile),
+                contentDescription = null,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .widthIn(max = 420.dp)
+                    .aspectRatio(550f / 346f),
+            )
+        }
+        StatusReadout(message, subMessage, elapsed, percent)
+    }
+}
+
+/** The centered screens' message, live sub-status, progress bar and clock, bottom-up in that order. */
+@Composable
+private fun StatusReadout(
+    message: String,
+    subMessage: String?,
+    elapsed: String?,
+    percent: Int,
+    modifier: Modifier = Modifier,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+            .padding(horizontal = 28.dp)
+            .padding(bottom = 46.dp),
+    ) {
+        if (message.isNotEmpty()) {
+            Text(
+                text = message,
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = HeroText,
+            )
+            Spacer(Modifier.height(if (!subMessage.isNullOrEmpty()) 8.dp else 20.dp))
+        }
+        // Live sub-status (e.g. "Backing up your saves…" / "Uploading: <file>") — lets slow
+        // operations like the GOG cloud upload show they're actively working, not frozen.
+        AnimatedVisibility(visible = !subMessage.isNullOrEmpty()) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    text = message,
-                    style = MaterialTheme.typography.headlineMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = HeroText,
+                    text = subMessage ?: "",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = HeroText.copy(alpha = 0.75f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
-                Spacer(Modifier.height(if (!subMessage.isNullOrEmpty()) 8.dp else 20.dp))
+                Spacer(Modifier.height(16.dp))
             }
-            // Live sub-status (e.g. "Backing up your saves…" / "Uploading: <file>") — lets slow
-            // operations like the GOG cloud upload show they're actively working, not frozen.
-            AnimatedVisibility(visible = !subMessage.isNullOrEmpty()) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(
-                        text = subMessage ?: "",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = HeroText.copy(alpha = 0.75f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Spacer(Modifier.height(16.dp))
-                }
-            }
-            // Determinate while something measurable is happening (the Steam client's download,
-            // read out of the session log), the slim indeterminate bar otherwise.
-            val barModifier = Modifier
-                .width(190.dp)
-                .height(5.dp)
-                .clip(RoundedCornerShape(4.dp))
-            if (percent >= 0) {
-                LinearProgressIndicator(
-                    progress = { percent.coerceIn(0, 100) / 100f },
-                    color = HeroAccent,
-                    trackColor = Color.White.copy(alpha = 0.16f),
-                    strokeCap = StrokeCap.Round,
-                    modifier = barModifier,
-                )
-            } else {
-                LinearProgressIndicator(
-                    color = HeroAccent,
-                    trackColor = Color.White.copy(alpha = 0.16f),
-                    strokeCap = StrokeCap.Round,
-                    modifier = barModifier,
-                )
-            }
-            // The clock: a first run is minutes of nothing on screen, and a number that keeps
-            // moving is what separates "still working" from "hung" for the person watching.
-            AnimatedVisibility(visible = !elapsed.isNullOrEmpty()) {
-                Text(
-                    text = elapsed ?: "",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = HeroText.copy(alpha = 0.55f),
-                    modifier = Modifier.padding(top = 10.dp),
-                )
-            }
+        }
+        // Determinate while something measurable is happening (the Steam client's download,
+        // read out of the session log), the slim indeterminate bar otherwise.
+        val barModifier = Modifier
+            .width(190.dp)
+            .height(5.dp)
+            .clip(RoundedCornerShape(4.dp))
+        if (percent >= 0) {
+            LinearProgressIndicator(
+                progress = { percent.coerceIn(0, 100) / 100f },
+                color = HeroAccent,
+                trackColor = Color.White.copy(alpha = 0.16f),
+                strokeCap = StrokeCap.Round,
+                modifier = barModifier,
+            )
+        } else {
+            LinearProgressIndicator(
+                color = HeroAccent,
+                trackColor = Color.White.copy(alpha = 0.16f),
+                strokeCap = StrokeCap.Round,
+                modifier = barModifier,
+            )
+        }
+        // The clock: a first run is minutes of nothing on screen, and a number that keeps
+        // moving is what separates "still working" from "hung" for the person watching.
+        AnimatedVisibility(visible = !elapsed.isNullOrEmpty()) {
+            Text(
+                text = elapsed ?: "",
+                style = MaterialTheme.typography.bodySmall,
+                color = HeroText.copy(alpha = 0.55f),
+                modifier = Modifier.padding(top = 10.dp),
+            )
         }
     }
 }

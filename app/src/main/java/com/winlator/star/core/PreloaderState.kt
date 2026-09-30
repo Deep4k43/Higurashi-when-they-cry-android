@@ -41,6 +41,7 @@ data class PreloaderUi(
     val centered: Boolean = false,     // true for the centered status/shutdown screen (no cover hero)
     val percent: Int = -1,             // centered screen: a determinate bar when >= 0 (a download's progress)
     val elapsed: String? = null,       // centered screen: the clock line, so a quiet log still shows time moving
+    val linuxSteam: Boolean = false,   // centered screen: the Linux Steam session's black page with the entry's art
 )
 
 /**
@@ -87,6 +88,15 @@ object PreloaderState {
      */
     @JvmStatic fun show(title: String?) {
         _ui.value = PreloaderUi(title = "", tailLabel = title ?: "", phase = Phase.GUEST, centered = true)
+    }
+
+    /**
+     * The Linux Steam session's loading screen: the centered status screen, on plain black with the Steam (Linux) entry's art instead of the neon wallpaper.
+     * [linuxProgress] keeps the flag, since it copies the state it updates.
+     */
+    @JvmStatic fun showLinuxSteam(title: String?) {
+        _ui.value = PreloaderUi(title = "", tailLabel = title ?: "", phase = Phase.GUEST, centered = true,
+            linuxSteam = true)
     }
 
     /** Advance the determinate bar to [index]/stepTotal with [label]. */
