@@ -158,6 +158,27 @@ reap_orphans() {
     sleep 0.2
   done
 }
+# This script's own background loops and daemons: the fill-screen and resume watchers never end on their own, and the seeder and core-pinning loops run for an hour.
+# Left running when the script exits, they pass to gamescope's reaper and hold the compositor up on a black screen. (From Droid-Deck/DroidDeck #50.)
+# Each job's direct children go first, since killing a subshell leaves its pipeline running (the resume watcher's xprop -spy) and its current nap asleep.
+# The jobs are waited for, so what they leave behind has been handed to gamescope by the time reap_orphans looks.
+# One that is still up after two seconds is killed outright, so a job that ignores SIGTERM cannot hang the teardown here.
+stop_own_jobs() {
+  local jobs_left j alive
+  jobs_left=$(jobs -p)
+  [ -n "$jobs_left" ] || return 0
+  for j in $jobs_left; do pkill -TERM -P "$j" 2>/dev/null; done
+  kill $jobs_left 2>/dev/null
+  for _ in $(seq 1 20); do
+    alive=
+    for j in $jobs_left; do kill -0 "$j" 2>/dev/null && alive="$alive $j"; done
+    [ -n "$alive" ] || break
+    sleep 0.1
+  done
+  [ -n "$alive" ] && kill -9 $alive 2>/dev/null
+  wait $jobs_left 2>/dev/null
+  return 0
+}
 
 case $mode in
   desktop)
@@ -182,6 +203,8 @@ case $mode in
     esac
     ;;
   steam)
+    # Every way out of this branch, a signal from the teardown included, stops the loops started below.
+    trap stop_own_jobs EXIT
     step "checking the Steam client (first run downloads it, ~1-2 min with nothing on screen)"
     bannerlator-steam-install || exit $?
     step "Steam client ready"
@@ -504,8 +527,77 @@ BUSCONF
       stop_watcher=$!
       : > "$BL_LIVE_DIR/steam-stop-ready"
     fi
+    # Offline mode, from the entry's settings: the client starts in its own offline mode instead of signing in to Valve.
+    # Two keys in the account's block of loginusers.vdf decide it: WantsOfflineMode goes offline without trying, and SkipOfflineModeWarning stops the client asking first.
+    # The client reads them only while it starts and rewrites the file when it exits, so they are written before every start, the restarts below included.
+    # On, the account the client signs in as gets both set to 1, added when the block lacks them.
+    # That account is the one marked MostRecent "1" (older clients) or AutoLogin "1" (the client on the device, 2026-09-30), or every account when none is marked, as DroidDeck does.
+    # Off, any of those keys set to 1 in any account goes back to 0, so a session that was offline does not stay that way; nothing is added.
+    # Only those two keys are touched, and the file is replaced only when something changed.
+    # It needs a remembered sign-in from an earlier online session on this device; with none there is nothing to be offline as, and the client asks for a sign-in as usual. (From Droid-Deck/DroidDeck, OfflineMode.)
+    steam_offline_mode() {
+      local users=$steam_root/config/loginusers.vdf want=${BL_STEAM_OFFLINE:-0}
+      case $want in 0|1) ;; *) return 0 ;; esac
+      if [ ! -s "$users" ]; then
+        [ "$want" = 1 ] && echo "== steam: offline mode asked for, but no account has signed in on this device yet; signing in online"
+        return 0
+      fi
+      if [ "$want" = 1 ] && ! grep -q '"RememberPassword"[[:space:]]*"1"' "$users" 2>/dev/null; then
+        echo "== steam: offline mode asked for, but no account has a remembered sign-in; the client will ask to sign in"
+      fi
+      awk -v want="$want" '
+        NR == FNR {
+          if ($0 ~ /^[[:space:]]*\{[[:space:]]*$/) { depth++; if (depth == 2) cur = pending; next }
+          if ($0 ~ /^[[:space:]]*\}[[:space:]]*$/) { depth--; next }
+          if (depth == 1 && $0 ~ /^[[:space:]]*"[^"]*"[[:space:]]*$/) { pending = $0; next }
+          if (depth == 2 && $0 ~ /"(MostRecent|AutoLogin)"[[:space:]]*"1"/) { recent[cur] = 1; anyrecent = 1 }
+          next
+        }
+        FNR == 1 { depth = 0 }
+        {
+          line = $0
+          if (line ~ /^[[:space:]]*\{[[:space:]]*$/) {
+            depth++
+            if (depth == 2) { cur = pending; target = (want == 1) && (!anyrecent || (cur in recent)); sawwants = 0; sawskip = 0; indent = "" }
+            print line; next
+          }
+          if (line ~ /^[[:space:]]*\}[[:space:]]*$/) {
+            if (depth == 2 && target) {
+              if (!sawwants) { print indent "\"WantsOfflineMode\"\t\t\"1\""; changed = 1 }
+              if (!sawskip) { print indent "\"SkipOfflineModeWarning\"\t\t\"1\""; changed = 1 }
+            }
+            depth--
+            print line; next
+          }
+          if (depth == 1 && line ~ /^[[:space:]]*"[^"]*"[[:space:]]*$/) pending = line
+          if (depth == 2) {
+            if (indent == "" && match(line, /^[[:space:]]*"/)) indent = substr(line, 1, RLENGTH - 1)
+            if (line ~ /^[[:space:]]*"(WantsOfflineMode|SkipOfflineModeWarning)"[[:space:]]*"[01]"[[:space:]]*$/) {
+              if (line ~ /"WantsOfflineMode"/) sawwants = 1; else sawskip = 1
+              value = target ? "1" : (want == 1 ? "" : "0")
+              if (value != "" && line !~ ("\"" value "\"[[:space:]]*$")) {
+                sub(/"[01]"[[:space:]]*$/, "\"" value "\"", line)
+                changed = 1
+              }
+            }
+          }
+          print line
+        }
+        END { exit changed ? 0 : 3 }
+      ' "$users" "$users" > "$users.bl-offline"
+      case $? in
+        0)
+          mv -f "$users.bl-offline" "$users"
+          echo "== steam: offline mode $([ "$want" = 1 ] && echo on || echo off) written to loginusers.vdf"
+          ;;
+        *)
+          rm -f "$users.bl-offline"
+          ;;
+      esac
+    }
     while :; do
       rm -f "$HOME/.bl-restart-once"
+      steam_offline_mode
       # The branch on disk has to agree with the one forced on the command line, and it is checked before every start rather than once.
       # The client rewrites package/beta during its own run, and an rc=42 restart below would otherwise start it again on the branch it just wrote.
       # A disagreement is the restart loop described above, and it is silent apart from rc=42 in this log.
@@ -541,6 +633,7 @@ BUSCONF
       wait "$stop_watcher" 2>/dev/null || true
     fi
     kill ${netmanager:-} ${system_bus:-} 2>/dev/null || true
+    stop_own_jobs
     reap_orphans
     exit "$rc"
     ;;

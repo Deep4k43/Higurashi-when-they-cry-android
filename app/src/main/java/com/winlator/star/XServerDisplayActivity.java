@@ -7171,6 +7171,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             com.winlator.star.linux.LinuxTuning.EXTRA_DOUBLE_BACK_QAM,
             com.winlator.star.linux.LinuxTuning.EXTRA_NO_XALIA,
             com.winlator.star.linux.LinuxTuning.EXTRA_PROOT_NO_SECCOMP,
+            com.winlator.star.linux.LinuxTuning.EXTRA_OFFLINE,
     };
 
     /**
@@ -7178,7 +7179,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
      * Every switch there is the entry's own Steam (Linux) setting: a flip is saved to the entry, and
      * applied at once where it can be - fill-screen through the session's watcher, the Quake-engine
      * fix and xalia at the next game start through the Proton wrappers, the buttons and double Back
-     * immediately. proot's seccomp and Turnip's sysmem take effect at the next session.
+     * immediately. proot's seccomp, Turnip's sysmem and offline mode take effect at the next session.
      */
     private void setupLinuxSteamDrawerGlue(FrameLayout rootView) {
         XServerDrawerState state = XServerDrawerState.INSTANCE;
@@ -7367,6 +7368,22 @@ public class XServerDisplayActivity extends AppCompatActivity {
         ds.setVibrationMasterEnabled(winHandler.isVibrationMasterEnabled());
         ds.onVibrationMasterChanged = (enabled) -> winHandler.setVibrationMasterEnabled(enabled);
         ds.show(XServerDialogState.ActiveDialog.VIBRATION);
+    }
+
+    // Gamepad sticks, trackballs and touchpads are delivered as they arrive instead of batched to the next vsync.
+    // That takes up to one frame of latency off physical controller input in both Linux and Wine sessions.
+    private static final int UNBUFFERED_INPUT_SOURCES = android.view.InputDevice.SOURCE_CLASS_JOYSTICK
+            | android.view.InputDevice.SOURCE_CLASS_TRACKBALL | android.view.InputDevice.SOURCE_CLASS_POSITION;
+
+    @Override
+    public void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return;
+        final View decor = getWindow().getDecorView();
+        decor.requestUnbufferedDispatch(UNBUFFERED_INPUT_SOURCES);
+        // The request follows the focused view, so it is renewed whenever focus moves inside the window.
+        decor.getViewTreeObserver().addOnGlobalFocusChangeListener((oldFocus, newFocus) ->
+                decor.post(() -> decor.requestUnbufferedDispatch(UNBUFFERED_INPUT_SOURCES)));
     }
 
     @Override
@@ -9287,6 +9304,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
     private void setupLinuxSession(String rootPath) {
+        // An update killed mid-swap leaves the rootfs parked beside its real name, so put it back before checking for it.
+        com.winlator.star.linux.LinuxRuntimeInstaller.recoverInterruptedSwap(this);
         if (!com.winlator.star.linux.LinuxRuntime.isInstalled(this)) {
             throw new IllegalStateException("The Linux runtime is not installed."
                     + " Install it from Components before launching a gamescope session.");

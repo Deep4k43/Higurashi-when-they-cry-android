@@ -6377,6 +6377,7 @@ internal fun ShortcutSettingsDialogScreen(
     var linuxDoubleBackQam by remember { mutableStateOf(com.winlator.star.linux.LinuxTuning.isOn(shortcut, com.winlator.star.linux.LinuxTuning.EXTRA_DOUBLE_BACK_QAM)) }
     var linuxNoXalia by remember { mutableStateOf(com.winlator.star.linux.LinuxTuning.isOn(shortcut, com.winlator.star.linux.LinuxTuning.EXTRA_NO_XALIA)) }
     var linuxProotNoSeccomp by remember { mutableStateOf(com.winlator.star.linux.LinuxTuning.isOn(shortcut, com.winlator.star.linux.LinuxTuning.EXTRA_PROOT_NO_SECCOMP)) }
+    var linuxOffline by remember { mutableStateOf(com.winlator.star.linux.LinuxTuning.isOn(shortcut, com.winlator.star.linux.LinuxTuning.EXTRA_OFFLINE)) }
     var linuxTurnipSysmem by remember { mutableStateOf(com.winlator.star.linux.LinuxTuning.turnipSysmemChoice(shortcut)) }
     var linuxTouch by remember { mutableStateOf(com.winlator.star.linux.LinuxTuning.touchChoice(shortcut)) }
     // The app's own games in the client's library, their shared saves, and any Games folders (LinuxAppGames).
@@ -7050,6 +7051,7 @@ internal fun ShortcutSettingsDialogScreen(
                 putExtra(com.winlator.star.linux.LinuxTuning.EXTRA_DOUBLE_BACK_QAM, if (linuxDoubleBackQam) "1" else "0")
                 putExtra(com.winlator.star.linux.LinuxTuning.EXTRA_NO_XALIA, if (linuxNoXalia) "1" else "0")
                 putExtra(com.winlator.star.linux.LinuxTuning.EXTRA_PROOT_NO_SECCOMP, if (linuxProotNoSeccomp) "1" else "0")
+                putExtra(com.winlator.star.linux.LinuxTuning.EXTRA_OFFLINE, if (linuxOffline) "1" else "0")
                 putExtra(com.winlator.star.linux.LinuxTuning.EXTRA_TU_SYSMEM, linuxTurnipSysmem.ifEmpty { null })
                 putExtra(com.winlator.star.linux.LinuxTuning.EXTRA_TOUCH, linuxTouch.ifEmpty { null })
                 putExtra(com.winlator.star.linux.LinuxTuning.EXTRA_APP_GAMES, if (linuxAppGames) "1" else "0")
@@ -7109,6 +7111,7 @@ internal fun ShortcutSettingsDialogScreen(
                     add(com.winlator.star.linux.LinuxTuning.EXTRA_DOUBLE_BACK_QAM)
                     add(com.winlator.star.linux.LinuxTuning.EXTRA_FILL_SCREEN)
                     add(com.winlator.star.linux.LinuxTuning.EXTRA_IDTECH3)
+                    add(com.winlator.star.linux.LinuxTuning.EXTRA_OFFLINE)
                     add(com.winlator.star.linux.LinuxTuning.EXTRA_NO_XALIA)
                     add(com.winlator.star.linux.LinuxTuning.EXTRA_PROOT_NO_SECCOMP)
                     add(com.winlator.star.linux.LinuxTuning.EXTRA_TU_SYSMEM)
@@ -7805,13 +7808,17 @@ internal fun ShortcutSettingsDialogScreen(
                             PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_IDTECH3,
                                 "Quake-engine games windowed", linuxIdTech3,
                                 com.winlator.star.linux.LinuxTuning.defaultOn(com.winlator.star.linux.LinuxTuning.EXTRA_IDTECH3)) { linuxIdTech3 = it }
+                            PerfEditRow(dp, com.winlator.star.linux.LinuxTuning.EXTRA_OFFLINE,
+                                "Offline mode (no sign-in to Valve)", linuxOffline,
+                                com.winlator.star.linux.LinuxTuning.defaultOn(com.winlator.star.linux.LinuxTuning.EXTRA_OFFLINE)) { linuxOffline = it }
                             Text(
                                 "Touchscreen sends fingers to Steam as real touches (Big Picture scrolls under one); Touchpad moves the pointer with a drag and clicks with a tap. "
                                     + "The buttons sit in the top corners: Steam's menu on the left, its Quick Access Menu on the right. "
                                     + "With double Back, one Back press still opens the in-game drawer. "
                                     + "Stretch keeps a game that shrinks its window (FlatOut after Resume game) filling the screen. "
                                     + "Quake III, Team Arena, Return to Castle Wolfenstein and Jedi Academy run windowed at the session's size, the one way they start here. "
-                                    + "The in-game drawer has all of these too, and changes them without restarting.",
+                                    + "Offline mode starts Steam without signing in to Valve, and installed games still launch; it needs one online sign-in on this device first. "
+                                    + "The in-game drawer has all of these too, and changes them without restarting, except offline mode, which applies at the next session.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
