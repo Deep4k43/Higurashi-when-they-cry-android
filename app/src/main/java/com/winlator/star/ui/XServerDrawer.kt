@@ -1449,6 +1449,11 @@ private fun LinuxSteamSection(state: XServerDrawerState) {
     }
     HelperText("Quake III, Team Arena, Return to Castle Wolfenstein and Jedi Academy run windowed at the session's size, " +
         "the one way they start here. Applies at the next game start.")
+    ToggleRow("Offline mode", on(LinuxTuning.EXTRA_OFFLINE)) {
+        flip(LinuxTuning.EXTRA_OFFLINE, it)
+    }
+    HelperText("Steam starts without signing in to Valve; installed games still launch. Needs one online sign-in on this device first. " +
+        "The client reads it only as it starts, so it applies at the next session.")
 
     Spacer(Modifier.height(6.dp))
     Text("Troubleshooting", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)

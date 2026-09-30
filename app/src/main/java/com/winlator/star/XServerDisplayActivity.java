@@ -7171,6 +7171,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
             com.winlator.star.linux.LinuxTuning.EXTRA_DOUBLE_BACK_QAM,
             com.winlator.star.linux.LinuxTuning.EXTRA_NO_XALIA,
             com.winlator.star.linux.LinuxTuning.EXTRA_PROOT_NO_SECCOMP,
+            com.winlator.star.linux.LinuxTuning.EXTRA_OFFLINE,
     };
 
     /**
@@ -7178,7 +7179,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
      * Every switch there is the entry's own Steam (Linux) setting: a flip is saved to the entry, and
      * applied at once where it can be - fill-screen through the session's watcher, the Quake-engine
      * fix and xalia at the next game start through the Proton wrappers, the buttons and double Back
-     * immediately. proot's seccomp and Turnip's sysmem take effect at the next session.
+     * immediately. proot's seccomp, Turnip's sysmem and offline mode take effect at the next session.
      */
     private void setupLinuxSteamDrawerGlue(FrameLayout rootView) {
         XServerDrawerState state = XServerDrawerState.INSTANCE;

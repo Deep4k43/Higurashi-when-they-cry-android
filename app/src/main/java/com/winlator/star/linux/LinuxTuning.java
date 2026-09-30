@@ -62,6 +62,8 @@ public final class LinuxTuning {
     public static final String EXTRA_NO_XALIA = "linuxNoXalia";
     /** PROOT_NO_SECCOMP=1: proot traces every system call itself instead of filtering them with seccomp. Off unless turned on. */
     public static final String EXTRA_PROOT_NO_SECCOMP = "linuxProotNoSeccomp";
+    /** The client starts in its own offline mode (WantsOfflineMode in loginusers.vdf) instead of signing in to Valve. Off unless turned on. */
+    public static final String EXTRA_OFFLINE = "linuxOffline";
     /** Turnip's sysmem rendering (TU_DEBUG=sysmem): "" automatic, "1" on, "0" off. */
     public static final String EXTRA_TU_SYSMEM = "linuxTurnipSysmem";
     /** The choices for {@link #EXTRA_TU_SYSMEM}, the empty first entry meaning automatic. */
@@ -104,10 +106,12 @@ public final class LinuxTuning {
      * {@link #EXTRA_NO_XALIA} is on, so xalia is skipped unless the entry turns the switch off.
      * xalia is an x86 program Proton starts beside every game for gamepad navigation the session already has, and under FEX it costs each game a slice of a core (about 10% of one beside Once Upon a KATAMARI on an SD 8 Gen 2).
      * It also crash-looped one Galaxy Fold at start. (From Droid-Deck/DroidDeck #85.)
+     * {@link #EXTRA_OFFLINE} is off: the client signs in to Valve unless the entry asks otherwise.
      */
     public static boolean defaultOn(String extra) {
         return !EXTRA_STEAMDECK.equals(extra)
-                && !EXTRA_PROOT_NO_SECCOMP.equals(extra);
+                && !EXTRA_PROOT_NO_SECCOMP.equals(extra)
+                && !EXTRA_OFFLINE.equals(extra);
     }
 
     /** A switch's state for this entry: its own value, or the default when it has none. */
@@ -241,6 +245,8 @@ public final class LinuxTuning {
         if (!fi.isEmpty()) guest.add("BL_FILTER=" + fi);
         // What gamescope starts with; the drawer's changes go through the live file instead.
         guest.add("BL_FILL=" + (isOn(shortcut, EXTRA_FILL_SCREEN) ? "1" : "0"));
+        // The session script writes this into loginusers.vdf before every client start, because the client reads it only then and rewrites the file when it exits.
+        guest.add("BL_STEAM_OFFLINE=" + (isOn(shortcut, EXTRA_OFFLINE) ? "1" : "0"));
     }
 
     /** One line per switch for the session's device report, so a number names its settings. */
@@ -258,6 +264,7 @@ public final class LinuxTuning {
                 {"Double Back opens QAM", EXTRA_DOUBLE_BACK_QAM},
                 {"Xalia off", EXTRA_NO_XALIA},
                 {"proot without seccomp", EXTRA_PROOT_NO_SECCOMP},
+                {"Steam offline mode", EXTRA_OFFLINE},
         };
         StringBuilder b = new StringBuilder();
         for (String[] row : rows) {
