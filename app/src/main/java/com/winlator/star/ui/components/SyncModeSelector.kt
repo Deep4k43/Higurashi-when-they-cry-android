@@ -15,8 +15,13 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Help
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -39,6 +44,8 @@ import com.winlator.star.core.SyncMode
  * being probed: only wineserver and the current pick stay live until it lands.
  *
  * Touch only; a D-pad host wraps it and drives [onPick] itself ([focused] draws its highlight).
+ * [onHelp] non-null → the app's usual "?" beside the label; the host opens R.string.help_sync_mode
+ * in its HelpDialog.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -51,6 +58,7 @@ fun SyncModeSelector(
     focused: Boolean = false,
     // Non-null (game editor, while this game overrides the container) → a "Use container's" action.
     onUseContainer: (() -> Unit)? = null,
+    onHelp: (() -> Unit)? = null,
 ) {
     val cs = MaterialTheme.colorScheme
     val shape = RoundedCornerShape(12.dp)
@@ -70,12 +78,17 @@ fun SyncModeSelector(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalArrangement = Arrangement.Center,
         ) {
-            Text(
-                "Sync",
-                fontSize = 14.sp,
-                color = cs.onSurfaceVariant,
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.align(Alignment.CenterVertically).padding(end = 10.dp),
-            )
+            ) {
+                Text("Sync", fontSize = 14.sp, color = cs.onSurfaceVariant)
+                if (onHelp != null) {
+                    IconButton(onClick = onHelp, modifier = Modifier.size(44.dp)) {
+                        Icon(Icons.Default.Help, contentDescription = "What is Sync?", modifier = Modifier.size(18.dp))
+                    }
+                }
+            }
             Row(
                 modifier = Modifier
                     .align(Alignment.CenterVertically)

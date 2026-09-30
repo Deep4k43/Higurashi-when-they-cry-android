@@ -7693,6 +7693,7 @@ internal fun ShortcutSettingsDialogScreen(
                             onPick = pickSync,
                             focused = dp.isFocused("syncMode"),
                             onUseContainer = if (syncOverriding) ({ syncOverride = null }) else null,
+                            onHelp = { helpRes = R.string.help_sync_mode },
                             modifier = Modifier.dpadBringIntoView(dp, "syncMode"),
                         )
                     }

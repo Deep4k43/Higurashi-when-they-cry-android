@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Gamepad
 import androidx.compose.material.icons.filled.HdrOn
+import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Label
@@ -225,6 +226,10 @@ private fun generalRows(xmb: XmbScope, p: XmbPrefs, host: XmbGameHost): List<Xmb
             val stripped = SyncSupport.stripSyncVars(env)
             if (stripped != env) s.putExtra("envVars", stripped.ifEmpty { null })
             xmb.set(p, SyncMode.EXTRA, (if (v == syncLabels[0]) null else v)?.takeIf { it != cEff })
+        }
+        // The pop-up editors' "?" (help_sync_mode), as its own column.
+        rows += XmbRow.Link("syncHelp", "What is Sync?", Icons.Filled.HelpOutline, subtitle = "esync, ntsync, fsync and wineserver explained") {
+            xmbHelpMenu(p.context, xmb.scope, "Sync", R.string.help_sync_mode)
         }
     }
 

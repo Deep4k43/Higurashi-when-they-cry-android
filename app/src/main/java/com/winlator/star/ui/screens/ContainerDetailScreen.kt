@@ -885,6 +885,7 @@ private fun TopLevelFields(
                 helper = viewModel.syncNotice ?: com.winlator.star.ui.components.containerSyncHelper(
                     viewModel.syncMode, viewModel.syncCaps, viewModel.selectedWineVersion),
                 onPick = { viewModel.onSyncModePicked(it) },
+                onHelp = { helpRes = R.string.help_sync_mode },
             )
         }
         Spacer(Modifier.height(8.dp))
