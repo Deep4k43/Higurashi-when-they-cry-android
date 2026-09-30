@@ -1455,7 +1455,7 @@ private fun LinuxSteamSection(state: XServerDrawerState) {
     ToggleRow("Xalia off (PROTON_USE_XALIA=0)", on(LinuxTuning.EXTRA_NO_XALIA)) {
         flip(LinuxTuning.EXTRA_NO_XALIA, it)
     }
-    HelperText("For a game that crash-loops at start. Applies at the next game start.")
+    HelperText("On by default: xalia costs every game CPU time under FEX. Turn off only for a game that needs its gamepad navigation. Applies at the next game start.")
     ToggleRow("proot without seccomp", on(LinuxTuning.EXTRA_PROOT_NO_SECCOMP)) {
         flip(LinuxTuning.EXTRA_PROOT_NO_SECCOMP, it)
     }
