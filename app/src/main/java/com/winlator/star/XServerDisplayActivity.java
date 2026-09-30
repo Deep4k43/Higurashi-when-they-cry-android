@@ -9303,6 +9303,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
     }
 
     private void setupLinuxSession(String rootPath) {
+        // An update killed mid-swap leaves the rootfs parked beside its real name, so put it back before checking for it.
+        com.winlator.star.linux.LinuxRuntimeInstaller.recoverInterruptedSwap(this);
         if (!com.winlator.star.linux.LinuxRuntime.isInstalled(this)) {
             throw new IllegalStateException("The Linux runtime is not installed."
                     + " Install it from Components before launching a gamescope session.");

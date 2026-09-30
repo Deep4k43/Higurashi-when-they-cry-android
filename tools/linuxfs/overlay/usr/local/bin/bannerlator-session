@@ -158,6 +158,27 @@ reap_orphans() {
     sleep 0.2
   done
 }
+# This script's own background loops and daemons: the fill-screen and resume watchers never end on their own, and the seeder and core-pinning loops run for an hour.
+# Left running when the script exits, they pass to gamescope's reaper and hold the compositor up on a black screen. (From Droid-Deck/DroidDeck #50.)
+# Each job's direct children go first, since killing a subshell leaves its pipeline running (the resume watcher's xprop -spy) and its current nap asleep.
+# The jobs are waited for, so what they leave behind has been handed to gamescope by the time reap_orphans looks.
+# One that is still up after two seconds is killed outright, so a job that ignores SIGTERM cannot hang the teardown here.
+stop_own_jobs() {
+  local jobs_left j alive
+  jobs_left=$(jobs -p)
+  [ -n "$jobs_left" ] || return 0
+  for j in $jobs_left; do pkill -TERM -P "$j" 2>/dev/null; done
+  kill $jobs_left 2>/dev/null
+  for _ in $(seq 1 20); do
+    alive=
+    for j in $jobs_left; do kill -0 "$j" 2>/dev/null && alive="$alive $j"; done
+    [ -n "$alive" ] || break
+    sleep 0.1
+  done
+  [ -n "$alive" ] && kill -9 $alive 2>/dev/null
+  wait $jobs_left 2>/dev/null
+  return 0
+}
 
 case $mode in
   desktop)
@@ -182,6 +203,8 @@ case $mode in
     esac
     ;;
   steam)
+    # Every way out of this branch, a signal from the teardown included, stops the loops started below.
+    trap stop_own_jobs EXIT
     step "checking the Steam client (first run downloads it, ~1-2 min with nothing on screen)"
     bannerlator-steam-install || exit $?
     step "Steam client ready"
@@ -541,6 +564,7 @@ BUSCONF
       wait "$stop_watcher" 2>/dev/null || true
     fi
     kill ${netmanager:-} ${system_bus:-} 2>/dev/null || true
+    stop_own_jobs
     reap_orphans
     exit "$rc"
     ;;
