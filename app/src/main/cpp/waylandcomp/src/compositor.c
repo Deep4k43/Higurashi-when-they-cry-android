@@ -166,6 +166,9 @@ struct client_info {
     /* Clients that describe opaque regions can use alpha outside those regions. Wine windows
      * never describe them, and their unused alpha channel must not make them translucent. */
     unsigned declares_opaque : 1;
+    /* gamescope (the Linux session): without an FPS limit its replaced buffers still go back once per
+     * refresh (release_buffer). Every other program gets them back at once. */
+    unsigned refresh_paced : 1;
     unsigned dmabuf_buffers, shm_frames;
     struct client_info *next;
 };
@@ -213,6 +216,7 @@ static void on_client_created(struct wl_listener *l, void *data) {
         }
         close(fd);
     }
+    ci->refresh_paced = !strncmp(ci->name, "gamescope", 9);
     ci->destroy.notify = on_client_destroyed;
     wl_client_add_destroy_listener(client, &ci->destroy);
     ci->next = g_clients;
@@ -252,6 +256,7 @@ struct surface {
     struct wl_list frames;                  /* frame callbacks for the next redraw */
     struct wl_list feedback;                /* presentation feedback for the current content */
     int drawn;                              /* part of the last rendered scene */
+    int dmabuf_shown;                       /* the current dmabuf has been in a scene on screen */
     int64_t next_release_ns;                /* FPS limiter: when this surface's last buffer goes back */
     int releases_pending;                   /* FPS limiter: buffers of this surface still to be released */
 
@@ -372,6 +377,9 @@ static struct {
     unsigned copy_scenes;                    /* scenes drawn into the screen swapchain (the copy path) */
     unsigned releases, releases_held;        /* wl_buffer.release after a replacement; held = 1 ms or more */
     int64_t release_ns, release_max_ns;      /* replaced (or taken off the layer) -> released to the game */
+    unsigned unshown;                        /* replaced before any scene showed them (mailbox: given back at once) */
+    unsigned refresh_paced;                  /* releases put on the refresh cadence without a limit (gamescope) */
+    int layer_in_flight_max;                 /* display-layer transactions SurfaceFlinger had not answered yet */
 } g_perf;
 
 static void schedule_render(void);
@@ -441,7 +449,7 @@ static int on_release_timer(int fd, uint32_t mask, void *data) {
     return 0;
 }
 
-/* Give a replaced buffer back to its client on the limiter's cadence, or the screen's when there is no limit.
+/* Give a replaced buffer back to its client: now, or on the limiter's cadence.
  *
  * Each release takes the next slot of a per-surface cadence (one slot per interval), so a game
  * gets one buffer back per interval however fast it commits. The schedule is kept honest at both
@@ -453,13 +461,17 @@ static int on_release_timer(int fd, uint32_t mask, void *data) {
  * limit had spaced out, and the game's first frames after that waited on empty slots. */
 static void release_buffer(struct surface *s, struct wl_resource *buffer, int64_t since_ns) {
     const int limit = g_fps_limit;
-    /* Without a limit of its own a game is paced to the screen's measured refresh.
-     * A swapchain that does not wait for frame callbacks (MAILBOX, IMMEDIATE) is held back by nothing else here.
-     * Handing a replaced buffer straight back let it draw as fast as the GPU allowed, and everything above the refresh rate was thrown away (178 frames a second for 91 on screen, measured in WinNative).
-     * One release per refresh is the back-pressure X11 gives, and the screen shows the same frames either way.
-     * With a limit set the cadence is the limit's, exactly as before. (From Droid-Deck/DroidDeck #84.) */
-    const int64_t interval = limit > 0 ? 1000000000LL / limit : g_refresh_ns;
+    /* Without a limit a replaced buffer goes back at once: a MAILBOX swapchain gets its superseded
+     * frame back at the commit that replaced it, as the mailbox contract says, and the game runs
+     * uncapped as it does on X11. Pacing every program to the measured refresh here (DroidDeck #84,
+     * for gamescope) held each Wine game's buffers for (p + 1) refreshes and capped every API at
+     * exactly the panel rate - 144 fps at 144 Hz, 120 at 120 Hz, releases held 27-49 ms (Pocket FIT,
+     * 2026-09-30). Only gamescope keeps that cadence: it renders frames the screen throws away.
+     * With a limit set the cadence is the limit's, exactly as before. */
+    struct client_info *ci = limit > 0 ? NULL : client_info_of(wl_resource_get_client(s->resource));
+    const int64_t interval = limit > 0 ? 1000000000LL / limit : (ci && ci->refresh_paced ? g_refresh_ns : 0);
     if (interval <= 0 || g_release_timer_fd < 0) { wl_buffer_send_release(buffer); perf_note_release(since_ns); return; }
+    if (limit <= 0) g_perf.refresh_paced++;
     int64_t now = now_ns();
     int64_t at = s->next_release_ns + interval;
     int64_t latest = now + interval * (int64_t)(s->releases_pending + 1);
@@ -713,6 +725,8 @@ static void unmap_toplevel(struct surface *s) {
 static void drop_dmabuf(struct surface *s, int paced) {
     if (s->dmabuf) {
         wl_list_remove(&s->dmabuf_destroy.link);
+        /* Replaced before any scene showed it: superseded, nothing reads it (the perf line). */
+        if (paced && !s->dmabuf_shown) g_perf.unshown++;
         /* A buffer on the zero-copy layer is the display's until SurfaceFlinger says otherwise:
          * ahb_swapchain.c releases it then. */
         if (!ahb_swapchain_defer_release(s->dmabuf_buf, s->dmabuf, s, paced)) {
@@ -721,6 +735,7 @@ static void drop_dmabuf(struct surface *s, int paced) {
         }
         s->dmabuf = NULL;
     }
+    s->dmabuf_shown = 0;
     dmabuf_buffer_unref(s->dmabuf_buf);
     s->dmabuf_buf = NULL;
 }
@@ -2345,6 +2360,8 @@ static void render_scene(void) {
                       : sc_layer_present(dl.d[li].img, w, h, ls ? banner_surface_color(ls) : NULL);
         if (r == 0) {
             if (ls) ls->drawn = 1;
+            const int in_flight = sc_layer_in_flight();
+            if (in_flight > g_perf.layer_in_flight_max) g_perf.layer_in_flight_max = in_flight;
             /* The one window above the game keeps the game off the copy path entirely: it goes on
              * its own layer, cropped and placed by the display. */
             int go[8], ov = 0;
@@ -2391,7 +2408,7 @@ static void render_scene(void) {
          * left pending: a FIFO present waits on it, and a client blocked there never commits
          * again. */
         wl_list_for_each(s, &g_surfaces, link) {
-            if (s->drawn) feedback_present_all(&s->feedback, t);
+            if (s->drawn) { feedback_present_all(&s->feedback, t); s->dmabuf_shown = 1; }
             else feedback_discard_all(&s->feedback);
         }
         fire_all_frames();
@@ -3619,7 +3636,8 @@ static int on_stats_timer(void *data) {
             banner_log("perf", "last 10 s: %u ticks, %u scenes, %u on screen (copy %u, zero-copy %u, layer copy %u) | "
                        "render_scene %.2f/%.2f ms | base %u black kept, %u presented | acquire %.2f/%.2f ms | "
                        "present %.2f/%.2f ms (%u) | fence wait %.2f/%.2f ms (%u, %u GPU release waits) | "
-                       "release %.2f/%.2f ms (%u, %u held) | %u pool drops",
+                       "release %.2f/%.2f ms (%u, %u held) | %u pool drops | "
+                       "%u replaced unshown, %u refresh-paced | layer in flight max %d",
                        g_perf.ticks, g_perf.scenes, g_stat_frames, g_perf.copy_scenes, zero_copy, layer_frames,
                        PERF_MS(g_perf.scene_ns, g_perf.scenes), (double)g_perf.scene_max_ns / 1e6,
                        vp.base_kept, vp.base_presents,
@@ -3627,7 +3645,8 @@ static int on_stats_timer(void *data) {
                        PERF_MS(vp.present_ns, vp.presents), (double)vp.present_max_ns / 1e6, vp.presents,
                        PERF_MS(vp.wait_ns, vp.waits), (double)vp.wait_max_ns / 1e6, vp.waits, vp.gpu_release_waits,
                        PERF_MS(g_perf.release_ns, g_perf.releases), (double)g_perf.release_max_ns / 1e6,
-                       g_perf.releases, g_perf.releases_held, drops);
+                       g_perf.releases, g_perf.releases_held, drops,
+                       g_perf.unshown, g_perf.refresh_paced, g_perf.layer_in_flight_max);
 #undef PERF_MS
         memset(&g_perf, 0, sizeof(g_perf));
     }

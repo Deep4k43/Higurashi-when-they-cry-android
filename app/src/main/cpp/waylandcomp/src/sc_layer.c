@@ -813,6 +813,13 @@ static void log_drop(struct layer *l) {
     }
 }
 
+int sc_layer_in_flight(void) {
+    pthread_mutex_lock(&g_lock);
+    int n = g_pending_cb;
+    pthread_mutex_unlock(&g_lock);
+    return n;
+}
+
 unsigned sc_layer_drops_take(void) {
     unsigned n = g_pool_drops;
     g_pool_drops = 0;

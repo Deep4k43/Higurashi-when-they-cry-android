@@ -171,5 +171,8 @@ unsigned sc_layer_frames_take(void);
 /* Frames dropped since the last call because every layer buffer was still held by the display (the
  * 10 s perf line; the "no free layer buffer" log line itself is rate-limited). */
 unsigned sc_layer_drops_take(void);
+/* Layer transactions applied whose OnComplete SurfaceFlinger has not delivered yet: how deep the
+ * display's queue is behind the compositor (the 10 s perf line samples it after each layer frame). */
+int sc_layer_in_flight(void);
 
 #endif
