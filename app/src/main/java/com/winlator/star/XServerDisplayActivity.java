@@ -7066,8 +7066,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 drawerLayout.closeDrawers();
                 return;
             }
-            // Steam (Linux): two Back presses within half a second open Steam's Quick Access Menu,
-            // and one still opens the drawer, just half a second later. (From The412Banner/DroidDeck.)
+            // Steam (Linux): two Back presses within Android's double-tap window (300 ms by default) open Steam's Quick Access Menu, and one still opens the drawer, just that much later.
+            // The window is Android's own rather than half a second, so the single press is felt sooner. (From The412Banner/DroidDeck, window from Droid-Deck/DroidDeck #73.)
             if (isLinuxSteamSession() && com.winlator.star.linux.LinuxTuning.isOn(
                     shortcut, com.winlator.star.linux.LinuxTuning.EXTRA_DOUBLE_BACK_QAM)) {
                 if (pendingLinuxBack != null) {
@@ -7080,15 +7080,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     pendingLinuxBack = null;
                     if (!drawerLayout.isDrawerOpen(GravityCompat.START)) drawerLayout.openDrawer(GravityCompat.START);
                 };
-                drawerLayout.postDelayed(pendingLinuxBack, LINUX_DOUBLE_BACK_MS);
+                drawerLayout.postDelayed(pendingLinuxBack, android.view.ViewConfiguration.getDoubleTapTimeout());
                 return;
             }
             drawerLayout.openDrawer(GravityCompat.START);
         }
     }
-
-    /** How long a first Back press waits for a second one in a Steam (Linux) session. */
-    private static final long LINUX_DOUBLE_BACK_MS = 500;
 
     /** A Linux session running the Steam client, where the Steam button and Quick Access Menu mean something. */
     private boolean isLinuxSteamSession() {
@@ -7096,25 +7093,63 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 shortcut.getExtra(com.winlator.star.linux.LinuxRuntime.EXTRA_LINUX_MODE, ""));
     }
 
+    // The client takes A as part of the chord only once it has had Guide held for a while, and a client starved of CPU needs longer.
+    // Too short, and it acts on A as well, selecting whatever it had focused before opening the Quick Access Menu.
+    // On DroidDeck, 80 ms of lead let that through 3 times in 20 at rest and 250 ms none in 20; at 1 fps a fixed 400 ms still let 3 in 15 through, where 1000 ms let none.
+    // So the lead keeps 80 ms when frames are quick, for a menu that feels immediate, and stretches to eight frames when they are slow. (From Droid-Deck/DroidDeck #70.)
+    private static final long LINUX_QAM_GUIDE_LEAD_MIN_MS = 80;
+    private static final long LINUX_QAM_GUIDE_LEAD_MAX_MS = 1500;
+    private static final int LINUX_QAM_GUIDE_LEAD_FRAMES = 8;
+    private static final long LINUX_QAM_A_HOLD_MS = 200;
+    private static final long LINUX_QAM_GUIDE_TAIL_MS = 200;
+    private static final long LINUX_STEAM_BUTTON_HOLD_MS = 90;
+    // The chord's steps run on their own thread, so a busy main thread cannot shorten or stretch them.
+    private static android.os.Handler linuxChord;
+
+    private static synchronized android.os.Handler linuxChordHandler() {
+        if (linuxChord == null) {
+            android.os.HandlerThread thread = new android.os.HandlerThread("steam-qam-chord", android.os.Process.THREAD_PRIORITY_DISPLAY);
+            thread.start();
+            linuxChord = new android.os.Handler(thread.getLooper());
+        }
+        return linuxChord;
+    }
+
+    /** Guide's lead before A in the Quick Access Menu chord: eight of the game's recent frames, within 80 ms to 1.5 s. */
+    private static long linuxQamGuideLeadMs() {
+        long frame = com.winlator.star.wayland.WaylandCompositor.recentFrameIntervalMs();
+        if (frame <= 0) return LINUX_QAM_GUIDE_LEAD_MIN_MS;
+        return Math.max(LINUX_QAM_GUIDE_LEAD_MIN_MS, Math.min(LINUX_QAM_GUIDE_LEAD_MAX_MS, frame * LINUX_QAM_GUIDE_LEAD_FRAMES));
+    }
+
     /**
-     * Presses the Steam button on player one's pad (Steam's own menu), or with {@code qam} the chord
-     * that opens the Quick Access Menu: Steam held, A tapped under it, Steam released. The timings are
-     * DroidDeck's PadBridge (80 ms lead, 120 ms A, 40 ms tail), which the client reads reliably. The
-     * drawer closes first, and the press waits for it to be gone.
+     * Presses the Steam button on player one's pad (Steam's own menu), or with {@code qam} the chord that opens the Quick Access Menu: Steam held, A tapped under it, Steam released.
+     * The timings are DroidDeck's PadBridge (a lead of eight frames within 80 ms to 1.5 s, 200 ms A, 200 ms tail), which the client reads reliably even when it is short of CPU.
+     * The drawer closes first, and the press waits for it to be gone.
+     * A new press replaces one still in flight, and every sequence ends released.
      */
     private void pressLinuxSteamButton(boolean qam) {
-        if (winHandler == null) return;
+        final WinHandler buttons = winHandler;
+        if (buttons == null) return;
         boolean drawerWasOpen = drawerLayout != null && drawerLayout.isDrawerOpen(GravityCompat.START);
         if (drawerWasOpen) drawerLayout.closeDrawers();
         long t = drawerWasOpen ? 250 : 0;
-        android.os.Handler h = new android.os.Handler(android.os.Looper.getMainLooper());
-        h.postDelayed(() -> winHandler.setSystemButtons(true, false), t);
+        android.os.Handler h = linuxChordHandler();
+        h.removeCallbacksAndMessages(null);
+        // Released here first, on the main thread where the pad creates the slot's writer too, so the chord thread never has to create it.
+        buttons.setSystemButtons(false, false);
         if (qam) {
-            h.postDelayed(() -> winHandler.setSystemButtons(true, true), t + 80);
-            h.postDelayed(() -> winHandler.setSystemButtons(true, false), t + 200);
-            h.postDelayed(() -> winHandler.setSystemButtons(false, false), t + 240);
+            h.postDelayed(() -> {
+                buttons.setSystemButtons(true, false);
+                long lead = linuxQamGuideLeadMs();
+                h.postDelayed(() -> buttons.setSystemButtons(true, true), lead);
+                h.postDelayed(() -> buttons.setSystemButtons(true, false), lead + LINUX_QAM_A_HOLD_MS);
+                h.postDelayed(() -> buttons.setSystemButtons(false, false), lead + LINUX_QAM_A_HOLD_MS + LINUX_QAM_GUIDE_TAIL_MS);
+                Log.i("XServerDisplayActivity", "Steam (Linux): Quick Access Menu chord with a " + lead + " ms Guide lead");
+            }, t);
         } else {
-            h.postDelayed(() -> winHandler.setSystemButtons(false, false), t + 90);
+            h.postDelayed(() -> buttons.setSystemButtons(true, false), t);
+            h.postDelayed(() -> buttons.setSystemButtons(false, false), t + LINUX_STEAM_BUTTON_HOLD_MS);
         }
         Log.i("XServerDisplayActivity", "Steam (Linux): " + (qam ? "Quick Access Menu" : "Steam button") + " pressed for the client");
     }
