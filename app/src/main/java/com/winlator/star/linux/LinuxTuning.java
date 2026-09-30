@@ -26,7 +26,7 @@ import java.util.Map;
 public final class LinuxTuning {
     /** Zink's GL front end marshals on the calling thread; this moves that to a second one. */
     public static final String EXTRA_GLTHREAD = "linuxGlThread";
-    /** The cheaper Zink descriptor path. */
+    /** The cheaper Zink descriptor path (ZINK_DESCRIPTORS=lazy with ZINK_DEBUG=compact). */
     public static final String EXTRA_LAZY_DESCRIPTORS = "linuxLazyDescriptors";
     /** Skips GL error bookkeeping in the hot path. */
     public static final String EXTRA_NO_GL_ERROR = "linuxNoGlError";
@@ -212,7 +212,11 @@ public final class LinuxTuning {
     public static Map<String, String> environment(Shortcut shortcut) {
         Map<String, String> env = new LinkedHashMap<>();
         if (isOn(shortcut, EXTRA_GLTHREAD)) env.put("mesa_glthread", "true");
-        if (isOn(shortcut, EXTRA_LAZY_DESCRIPTORS)) env.put("ZINK_DESCRIPTORS", "lazy");
+        if (isOn(shortcut, EXTRA_LAZY_DESCRIPTORS)) {
+            // Lazy descriptors with Zink's compact set layout, as the app's own containers default to and as WinNative runs the client. (From Droid-Deck/DroidDeck #84.)
+            env.put("ZINK_DESCRIPTORS", "lazy");
+            env.put("ZINK_DEBUG", "compact");
+        }
         if (isOn(shortcut, EXTRA_NO_GL_ERROR)) env.put("MESA_NO_ERROR", "1");
         return env;
     }
