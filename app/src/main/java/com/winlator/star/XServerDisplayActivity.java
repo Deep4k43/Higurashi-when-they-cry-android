@@ -7369,6 +7369,22 @@ public class XServerDisplayActivity extends AppCompatActivity {
         ds.show(XServerDialogState.ActiveDialog.VIBRATION);
     }
 
+    // Gamepad sticks, trackballs and touchpads are delivered as they arrive instead of batched to the next vsync.
+    // That takes up to one frame of latency off physical controller input in both Linux and Wine sessions.
+    private static final int UNBUFFERED_INPUT_SOURCES = android.view.InputDevice.SOURCE_CLASS_JOYSTICK
+            | android.view.InputDevice.SOURCE_CLASS_TRACKBALL | android.view.InputDevice.SOURCE_CLASS_POSITION;
+
+    @Override
+    public void onAttachedToWindow() {
+        super.onAttachedToWindow();
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return;
+        final View decor = getWindow().getDecorView();
+        decor.requestUnbufferedDispatch(UNBUFFERED_INPUT_SOURCES);
+        // The request follows the focused view, so it is renewed whenever focus moves inside the window.
+        decor.getViewTreeObserver().addOnGlobalFocusChangeListener((oldFocus, newFocus) ->
+                decor.post(() -> decor.requestUnbufferedDispatch(UNBUFFERED_INPUT_SOURCES)));
+    }
+
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
