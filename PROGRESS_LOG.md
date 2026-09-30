@@ -10,6 +10,7 @@
 > - **Defaults (`1ff73070`):** gamescope realtime queues off (`BL_GAMESCOPE_REALTIME=1` opts in), Xalia off unless the entry says otherwise.
 > - **Clean Steam exit (`6a37d122`):** Stop writes `$BL_LIVE_DIR/steam-stop`, the session runs `steam -shutdown`, the app waits up to 1.5 + 10 s off the UI thread (for the `steam-stop-ready` marker to go), then tears down as before.
 > - **QAM chord + Back (`9f7227ba`):** Guide lead 80–1500 ms scaled to the game's frame interval (`WaylandCompositor.recentFrameIntervalMs`), A held 200 ms, own HandlerThread; double Back = `ViewConfiguration.getDoubleTapTimeout()`.
+> - **Blend translucent surfaces (`feat/ddp4-blend`):** DroidDeck `b2eaf38` (from WinNative 69218fc) - `blend_pass.c` alpha pass for surfaces with an alpha buffer whose client declares opaque regions and whose opaque region does not cover them; everything else keeps the blit. Fixes Deck mode's black screen under the MangoHud bar (gamescope's full-size overlay plane blitted over the Steam UI). Translucent planes never go on the game layer; the overlay layer is marked translucent when its plane is. Wine does not call `set_opaque_region`, so Wine surfaces stay on the blit path.
 > - Not built yet at the time of writing; not device-tested.
 
 ## 2026-09-29 — ⚡ D3D12 on Wayland: the ~615 fps cap was a Turnip KGSL bug; adapter workaround bundled, driver fix on Banners-Turnip
