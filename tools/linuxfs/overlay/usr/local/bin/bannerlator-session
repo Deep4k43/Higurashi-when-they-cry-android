@@ -497,7 +497,7 @@ BUSCONF
             "$steam_root/steamrtarm64/steam" -shutdown >/dev/null 2>&1 || true
             exit 0
           fi
-          sleep 0.5
+          nap 0.5
         done
       ) &
       stop_watcher=$!

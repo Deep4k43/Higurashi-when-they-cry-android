@@ -1,5 +1,17 @@
 # Star-Compose — Progress Log
 
+## 2026-09-30 — 🐧 Linux Steam client: DroidDeck ports, wave 4 (branch `feat/linux-dd-ports-4`)
+> Survey 3 of Droid-Deck/DroidDeck org main `f3949067` against Bannerlator main `f351c188`; items 1–8 ported, each on its own sub-branch, merged here.
+> - **proot (`ddeca4e0`):** patches 0011 (kompat utsname only, inert without `-k`), 0012 (fake_id0 identity-only mode for `-i uid:uid`), 0013 (seccomp traps ioctl by request, drops kernel exit stops). 0012/0013 adapted to Termux v5.1.107.92: `config.h` fields, `prctl` left out, `SIOCGIFINDEX` stays trapped (our enter.c answers it), fake_id0/link2symlink list `statx` themselves. The app still runs the runtime tarball's proot, so this needs a hand A/B.
+> - **Path cache (`8b905655`):** `preload/pathcache.c` + realpath hook in inputudev.c, Steam client only, `BL_NO_PATH_CACHE=1` off.
+> - **Performance overlay (`393b092f`):** SysV message queues in `preload/sysv.c`, `preload/tracefs.c`, mangoapp wrapper `XDG_SESSION_TYPE=x11` + restart cap (5 in 60 s), GPU/CPU temperature binds. Not ported: `blend_pass.c` (not self-contained), `-steamos3` (open question: the stated reason for leaving it out is out of date).
+> - **gamescope p4 (`87f37811`):** patches 0100 (updated) + 0112 (restore a game iconified behind the Steam menu on Resume), resume watcher in the session (`BL_RESTORE_ON_RESUME=0` off). Tarball copied unchanged to winlator-contents pre-release `gamescope-3.16.29-p4` (sha256 `e750fb34…`).
+> - **Perf (`9f500283`):** compositor releases a replaced buffer once per refresh when no fps limit is set (also Wine Wayland: uncapped runs now top out at refresh), `nap()` instead of `sleep` in session-long watchers, `bl_libpath` in the Proton wrappers (`BL_KEEP_CLIENT_LIBPATH=1` keeps the client's), `write_changed` for the tool files and config.vdf, `ZINK_DEBUG=compact`.
+> - **Defaults (`1ff73070`):** gamescope realtime queues off (`BL_GAMESCOPE_REALTIME=1` opts in), Xalia off unless the entry says otherwise.
+> - **Clean Steam exit (`6a37d122`):** Stop writes `$BL_LIVE_DIR/steam-stop`, the session runs `steam -shutdown`, the app waits up to 1.5 + 10 s off the UI thread (for the `steam-stop-ready` marker to go), then tears down as before.
+> - **QAM chord + Back (`9f7227ba`):** Guide lead 80–1500 ms scaled to the game's frame interval (`WaylandCompositor.recentFrameIntervalMs`), A held 200 ms, own HandlerThread; double Back = `ViewConfiguration.getDoubleTapTimeout()`.
+> - Not built yet at the time of writing; not device-tested.
+
 ## 2026-09-29 — ⚡ D3D12 on Wayland: the ~615 fps cap was a Turnip KGSL bug; adapter workaround bundled, driver fix on Banners-Turnip
 > - **Cause:** Turnip's KGSL backend turns a timeline *poll* (timeout 0) into a KGSL timestamp *wait* with timeout 0, which KGSL treats as wait-forever; Mesa's timeline GC polls under a mutex on every signalling submit, so vkd3d-proton ran CPU and GPU in lock-step. (Not the Wayland present path — ruled out: present wait, image count, DXGI/VKD3D latency, zero-copy vs copy.)
 > - **App (`26088bf9`):** bundled adapter = bionic-vulkan-wrapper `3af78e4` (sha c3533274…), which answers those polls from the retired timestamp (`BANNER_KGSL_POLL_FIX=0` off). D3D12 demo on Wayland 614 → 4335 fps; AIO sweep unchanged. CI 36566451951 green (ludashi re-run after a runner `tar` flake). Staged pubg APK sha 9a5cdec7…
