@@ -1,6 +1,7 @@
 package com.winlator.star.ui
 
 import android.graphics.Bitmap
+import android.os.SystemClock
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -46,6 +47,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -68,6 +70,7 @@ import com.winlator.star.core.Phase
 import com.winlator.star.core.PreloaderDetails
 import com.winlator.star.core.PreloaderState
 import com.winlator.star.ui.screens.SpecChipRows
+import kotlinx.coroutines.delay
 
 // The hero surface is always laid over a dark scrim, so text/accents use fixed light-on-dark
 // values that read over any cover art rather than the ambient theme's surface colours.
@@ -89,8 +92,12 @@ fun PreloaderOverlay() {
     // Centered status/shutdown screen — calm logo + message + slim indeterminate bar.
     if (ui.centered) {
         val message = ui.tailLabel.ifEmpty { ui.title }
-        if (ui.linuxSteam) LinuxSteamStatus(message, ui.hint, ui.elapsed, ui.percent)
-        else CenteredStatus(message, ui.hint, ui.elapsed, ui.percent)
+        if (ui.linuxSteam) {
+            val elapsed = if (ui.closingSince > 0L) closingClock(ui.closingSince) else ui.elapsed
+            LinuxSteamStatus(message, ui.hint, elapsed, ui.percent)
+        } else {
+            CenteredStatus(message, ui.hint, ui.elapsed, ui.percent)
+        }
         return
     }
 
@@ -366,6 +373,23 @@ private fun LinuxSteamStatus(message: String, subMessage: String?, elapsed: Stri
         StatusReadout(message, subMessage, elapsed, percent)
     }
 }
+
+/**
+ * The Linux Steam page's clock while the session closes, in the same form as the loading screen's.
+ * It is counted here because nothing drives the page from the session log once the close has begun.
+ */
+@Composable
+private fun closingClock(since: Long): String {
+    val seconds by produceState(closingSeconds(since), since) {
+        while (true) {
+            delay(500)
+            value = closingSeconds(since)
+        }
+    }
+    return String.format(java.util.Locale.US, "%d:%02d elapsed · still working", seconds / 60, seconds % 60)
+}
+
+private fun closingSeconds(since: Long): Long = maxOf(0L, SystemClock.elapsedRealtime() - since) / 1000
 
 /** The centered screens' message, live sub-status, progress bar and clock, bottom-up in that order. */
 @Composable

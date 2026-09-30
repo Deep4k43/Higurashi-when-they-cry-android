@@ -2513,6 +2513,10 @@ trying for speed, <b>notemplates</b> if you get driver crashes.
         <b>Game cores</b><br /><br />
         Chooses which CPU cores a <b>game launched from the Steam client</b> may run on. It reaches games only - the client and its menus keep the list above. Leaving every core ticked lets Android place the work itself, which is usually the best choice.
     ]]></string>
+    <!-- The Linux session's closing screen: the same page as the loading screen, with these lines. -->
+    <string name="linux_steam_closing">Closing the Steam client</string>
+    <string name="linux_steam_closing_hint">The session is shutting down and closes on its own; nothing is stuck while this clock is moving.</string>
+    <string name="linux_steam_closing_saving_hint">Steam is saving and shutting down; the session closes on its own when it is done.</string>
     <!-- Rotating lines under the Linux session's loading screen, one every 8 s, while the client boots. -->
     <string-array name="linux_loading_hints">
         <item>The first run downloads the Steam client from Valve and then its update — a few minutes on a good connection.</item>
