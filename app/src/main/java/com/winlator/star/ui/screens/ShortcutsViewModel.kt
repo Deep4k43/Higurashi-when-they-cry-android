@@ -194,7 +194,10 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
             val sorted = when (order) {
                 ShortcutSortOrder.NAME_ASC   -> list.sortedBy { it.name.lowercase() }
                 ShortcutSortOrder.NAME_DESC  -> list.sortedByDescending { it.name.lowercase() }
-                ShortcutSortOrder.CONTAINER  -> list.sortedBy { (it.container?.name ?: "").lowercase() }
+                // Android games have no container: they form their own group, after every container's.
+                ShortcutSortOrder.CONTAINER  -> list.sortedWith(
+                    compareBy<Shortcut>({ AndroidGames.isHome(it.container) }, { (it.container?.name ?: "").lowercase() })
+                )
             }
             // The Steam entry is a launcher for everything else, not one game among many, so it
             // stays at the front of every view and sort order rather than being hunted for.
@@ -1032,18 +1035,15 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Writes a Games-list entry for each picked Android app. They go in the container the "+" flow
-     * already chose (else the first one) only because the Games list is read from container desktop
-     * dirs; the container is never started for them. Blocking — call from a background dispatcher.
+     * Writes a Games-list entry for each picked Android app into the Android games home
+     * (files/android-games — no container involved, see AndroidGames). Blocking — call from a
+     * background dispatcher.
      */
     fun addAndroidGames(
-        containerIndex: Int,
         apps: List<AndroidGames.InstalledApp>,
         context: Context,
     ): BulkImportSummary {
-        val containers = liveContainers()
-        val container = containers.getOrNull(containerIndex) ?: containers.firstOrNull()
-            ?: return BulkImportSummary(0, apps.size, listOf("Create a container first — the Games list lives in one."))
+        val container = manager.androidGamesContainer
         var added = 0
         val failures = mutableListOf<String>()
         for (app in apps) {
@@ -1215,6 +1215,7 @@ class ShortcutsViewModel(app: Application) : AndroidViewModel(app) {
         if (lnk.exists()) lnk.delete()
         if (deleted) {
             disableOnScreen(context, shortcut)
+            if (AndroidGames.isHome(shortcut.container)) AndroidGames.deleteArt(shortcut)
             refresh()
         }
         return deleted

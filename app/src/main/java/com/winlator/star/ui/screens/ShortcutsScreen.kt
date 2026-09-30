@@ -578,6 +578,9 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     // Bulk games-folder import: pick one folder holding many game folders, scan each for its exe,
     // then confirm the findings before anything is written to the container.
     var showImportMethodPicker by remember { mutableStateOf(false) }
+    // The + flow asks WHAT to add first; only the two Wine imports then ask for a container, and
+    // this holds which of them the container pick is for (null = none pending).
+    var pendingImportKind by remember { mutableStateOf<ImportKind?>(null) }
     // "Add Android game": the picker, and the write that follows its Add.
     var showAndroidPicker by remember { mutableStateOf(false) }
     var androidAddRunning by remember { mutableStateOf(false) }
@@ -1271,7 +1274,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             // menu is open (it would sit on top of the menu's rows).
             if (!(viewMode == ShortcutViewMode.XMB && xmbNested)) DraggableAddButton(
                 prefKey = "games",
-                onClick = { showImportContainerPicker = true },
+                onClick = { showImportMethodPicker = true },
                 outerPadding = 16.dp,
                 buttonModifier = Modifier
                     .size(56.dp)
@@ -1408,13 +1411,32 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         )
     }
 
-    // How to add: one exe (the original flow) or a whole folder of game folders.
+    // Once a container is picked for a Wine import, open the matching file/folder picker. A container
+    // is chosen by then, so hand the in-app picker its C: drive: a game living on C: imports as C:\…
+    // via WinePath and runs FROM the container's C:. Null-safe: only when the C: drive actually
+    // exists on disk. The system picker (SAF) has no C: notion.
+    fun launchImportPicker(kind: ImportKind) {
+        val driveC = pendingImportContainerIndex.takeIf { it >= 0 }
+            ?.let { vm.containers().getOrNull(it) }
+            ?.let { File(it.rootDir, ".wine/drive_c") }
+            ?.takeIf { it.isDirectory }
+        when (kind) {
+            ImportKind.EXE ->
+                if (importUseSystemPicker) importFileLauncher.launch("*/*")
+                else importFileInAppLauncher.launch(
+                    InAppFilePicker.buildIntent(context, InAppFilePicker.SHORTCUT, "Select .exe / .desktop / .lnk", driveCPath = driveC?.absolutePath)
+                )
+            ImportKind.FOLDER -> importFolderLauncher.launch(
+                InAppFilePicker.buildDirIntent(context, "Select your games folder", driveCPath = driveC?.absolutePath)
+            )
+        }
+    }
+
+    // What to add, asked first: one exe (the original flow), a whole folder of game folders — both
+    // then ask for a container — or Android games, which never use one.
     if (showImportMethodPicker) {
         OutlinedAlertDialog(
-            onDismissRequest = {
-                showImportMethodPicker = false
-                pendingImportContainerIndex = -1
-            },
+            onDismissRequest = { showImportMethodPicker = false },
             title = { Text("Add games") },
             text = {
                 Column {
@@ -1424,18 +1446,8 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                         icon = Icons.Default.InsertDriveFile,
                     ) {
                         showImportMethodPicker = false
-                        // A container is already chosen here — hand the in-app picker its C: drive so
-                        // the user can pick a game living on C: (games picked under drive_c import as
-                        // C:\… via WinePath, running FROM the container's C:). Null-safe: only when the
-                        // C: drive actually exists on disk. The system picker (SAF) has no C: notion.
-                        val driveC = pendingImportContainerIndex.takeIf { it >= 0 }
-                            ?.let { vm.containers().getOrNull(it) }
-                            ?.let { File(it.rootDir, ".wine/drive_c") }
-                            ?.takeIf { it.isDirectory }
-                        if (importUseSystemPicker) importFileLauncher.launch("*/*")
-                        else importFileInAppLauncher.launch(
-                            InAppFilePicker.buildIntent(context, InAppFilePicker.SHORTCUT, "Select .exe / .desktop / .lnk", driveCPath = driveC?.absolutePath)
-                        )
+                        pendingImportKind = ImportKind.EXE
+                        showImportContainerPicker = true
                     }
                     MenuOptionCard(
                         title = "Add games folder",
@@ -1443,18 +1455,10 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                         icon = Icons.Default.Folder,
                     ) {
                         showImportMethodPicker = false
-                        // Same C: hand-off as the single-exe path: let the folder picker browse the
-                        // chosen container's C: drive (scanned games under drive_c import as C:\…).
-                        val driveC = pendingImportContainerIndex.takeIf { it >= 0 }
-                            ?.let { vm.containers().getOrNull(it) }
-                            ?.let { File(it.rootDir, ".wine/drive_c") }
-                            ?.takeIf { it.isDirectory }
-                        importFolderLauncher.launch(
-                            InAppFilePicker.buildDirIntent(context, "Select your games folder", driveCPath = driveC?.absolutePath)
-                        )
+                        pendingImportKind = ImportKind.FOLDER
+                        showImportContainerPicker = true
                     }
-                    // Android games need no container; the one picked above only decides whose desktop
-                    // dir holds the entry (see ShortcutsViewModel.addAndroidGames).
+                    // No container: Android games live in their own home (see AndroidGames).
                     MenuOptionCard(
                         title = "Add Android game",
                         subtitle = "Pick games installed on this phone — they open as normal Android apps",
@@ -1467,10 +1471,7 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
             },
             confirmButton = {},
             dismissButton = {
-                TextButton(onClick = {
-                    showImportMethodPicker = false
-                    pendingImportContainerIndex = -1
-                }) { Text("Cancel") }
+                TextButton(onClick = { showImportMethodPicker = false }) { Text("Cancel") }
             },
         )
     }
@@ -1480,18 +1481,13 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
         AndroidGamePickerDialog(
             alreadyAdded = added,
             adding = androidAddRunning,
-            onDismiss = {
-                showAndroidPicker = false
-                pendingImportContainerIndex = -1
-            },
+            onDismiss = { showAndroidPicker = false },
             onAdd = { apps ->
-                val containerIndex = pendingImportContainerIndex
                 androidAddRunning = true
                 scope.launch {
-                    val summary = withContext(Dispatchers.IO) { vm.addAndroidGames(containerIndex, apps, context) }
+                    val summary = withContext(Dispatchers.IO) { vm.addAndroidGames(apps, context) }
                     androidAddRunning = false
                     showAndroidPicker = false
-                    pendingImportContainerIndex = -1
                     val message = if (summary.failed == 0) {
                         "Added ${summary.added} Android game${if (summary.added == 1) "" else "s"}"
                     } else {
@@ -1633,7 +1629,10 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
     if (showImportContainerPicker) {
         val containers = vm.containers()
         OutlinedAlertDialog(
-            onDismissRequest = { showImportContainerPicker = false },
+            onDismissRequest = {
+                showImportContainerPicker = false
+                pendingImportKind = null
+            },
             title = { Text("Select container") },
             text = {
                 Column {
@@ -1655,9 +1654,8 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                                 ) {
                                     showImportContainerPicker = false
                                     pendingImportContainerIndex = index
-                                    // Ask HOW to add before asking WHAT to add: one exe, or a whole
-                                    // folder of game folders.
-                                    showImportMethodPicker = true
+                                    pendingImportKind?.let { launchImportPicker(it) }
+                                    pendingImportKind = null
                                 }
                             }
                         }
@@ -1669,7 +1667,12 @@ fun ShortcutsScreen(vm: ShortcutsViewModel = viewModel()) {
                 }
             },
             confirmButton = {},
-            dismissButton = { TextButton(onClick = { showImportContainerPicker = false }) { Text("Cancel") } },
+            dismissButton = {
+                TextButton(onClick = {
+                    showImportContainerPicker = false
+                    pendingImportKind = null
+                }) { Text("Cancel") }
+            },
         )
     }
 
@@ -5626,7 +5629,7 @@ private fun ShortcutGridItem(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                // The container only stores an Android game's entry; naming it would suggest it runs there.
+                // Android games have no container to name (their home is not one).
                 if (!shortcut.container?.name.isNullOrEmpty() && !isAndroidTile) {
                     Text(
                         text = shortcut.container?.name ?: "",
@@ -10755,6 +10758,9 @@ private val AMAZON_ROOT_RE = Regex("""(^|[\\/])Amazon[\\/]""")
  */
 // The stages of the "Copy to Drive C" flow, in order: confirm the source root, resolve a
 // destination collision, run the background copy, then offer to delete the original.
+// The two "+" imports that run in a Wine container, and so ask for one after being picked.
+private enum class ImportKind { EXE, FOLDER }
+
 private enum class CopyToCPhase { CONFIRM, OVERWRITE, COPYING, DELETE_ORIGINAL }
 
 /**

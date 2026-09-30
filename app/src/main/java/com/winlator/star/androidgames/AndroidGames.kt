@@ -11,18 +11,163 @@ import android.util.Log
 import android.util.LruCache
 import androidx.core.graphics.drawable.toBitmap
 import com.winlator.star.container.Container
+import com.winlator.star.container.ContainerManager
 import com.winlator.star.container.Shortcut
 import com.winlator.star.core.FileUtils
+import org.json.JSONObject
 import java.io.File
 
 /**
  * Android games in the Games list ("+" → Add Android game). An entry is a plain `.desktop` shortcut
- * (see [AndroidGameEntry]) living in a container's desktop dir only because that is where the Games
- * list reads from; it never touches the container. Tapping one starts the app the normal Android
- * way, as its own task — nothing runs inside Bannerlator.
+ * (see [AndroidGameEntry]). Tapping one starts the app the normal Android way, as its own task —
+ * nothing runs inside Bannerlator.
+ *
+ * The entries live in their own home, `files/android-games/`, not in any Wine container: they never
+ * use one, and a container's delete must not take them along. The home is a [Container] envelope
+ * with a reserved id and nothing but a desktop and icon dir beneath it — the same trick as the Linux
+ * runtime's settings (LinuxSettings) — so [Shortcut], the cover art, rename and remove all work on
+ * it unchanged. [ContainerManager.getContainerById] hands it out for [CONTAINER_ID]; it is never in
+ * [ContainerManager.getContainers], so no container screen offers to edit, back up or delete it.
  */
 object AndroidGames {
     private const val TAG = "AndroidGames"
+
+    /** Never a real container's id (those count up from 1); the Linux settings are -7. */
+    const val CONTAINER_ID = -8
+    const val DIR = "android-games"
+    /** What the "Container" sort and the properties sheet call the home. */
+    const val NAME = "Android"
+    /** Written once every entry found in a Wine container has been moved to the home. */
+    private const val MIGRATION_MARKER = ".migrated-from-containers"
+
+    @JvmStatic
+    fun isHome(id: Int): Boolean = id == CONTAINER_ID
+
+    @JvmStatic
+    fun isHome(container: Container?): Boolean = container != null && container.id == CONTAINER_ID
+
+    /**
+     * The home envelope. No config file is written — there is nothing to configure — so it is built
+     * from the app's defaults each time; [ContainerManager] keeps one per instance.
+     */
+    @JvmStatic
+    fun homeContainer(context: Context, manager: ContainerManager): Container {
+        val root = File(context.filesDir, DIR)
+        root.mkdirs()
+        val container = Container(CONTAINER_ID, manager)
+        container.rootDir = root
+        try {
+            val data = JSONObject()
+            Container.checkObsoleteOrMissingProperties(data)
+            data.put("name", NAME)
+            container.loadData(data)
+        } catch (e: Exception) {
+            Log.w(TAG, "could not load defaults into the Android games home", e)
+        }
+        container.name = NAME
+        return container
+    }
+
+    @Volatile private var migrationChecked = false
+    private val migrationLock = Any()
+
+    /**
+     * Moves Android entries written by the first build of this feature — which put them in whichever
+     * container the "+" flow had picked — into the home, with their icons and covers. Runs from the
+     * first [ContainerManager.loadShortcuts] of the process, before anything is listed, so no screen
+     * ever shows an entry in its old place. Idempotent: a marker file ends it for good once a pass
+     * moves everything; a pass with a failure leaves no marker and the next app start tries again.
+     */
+    @JvmStatic
+    fun migrateOnce(home: Container, containers: List<Container>) {
+        if (migrationChecked) return
+        // Other threads' loads wait here until the pass is done, so none of them lists an entry
+        // halfway through its move.
+        synchronized(migrationLock) {
+            if (migrationChecked) return
+            try {
+                val marker = File(home.rootDir, MIGRATION_MARKER)
+                if (marker.isFile) return
+                var moved = 0
+                var failed = 0
+                var scanned = 0
+                for (c in containers) {
+                    if (isHome(c)) continue
+                    val files = c.desktopDir.listFiles { f -> f.isFile && f.name.endsWith(".desktop") } ?: continue
+                    scanned++
+                    for (f in files) {
+                        val text = runCatching { FileUtils.readString(f) }.getOrNull() ?: continue
+                        if (AndroidGameEntry.packageOf(text) == null) continue
+                        if (moveEntry(c, home, f, text)) moved++ else failed++
+                    }
+                }
+                // No marker from a pass that saw no container at all (the list can be empty before
+                // setup finishes): there would be nothing it had actually checked.
+                if (failed == 0 && scanned > 0) FileUtils.writeString(marker, "moved=$moved\n")
+                if (moved > 0 || failed > 0) {
+                    Log.i(TAG, "migration: moved $moved Android entr${if (moved == 1) "y" else "ies"} out of containers, $failed failed")
+                }
+            } finally {
+                migrationChecked = true
+            }
+        }
+    }
+
+    private fun copy(src: File, dst: File): Boolean = try {
+        dst.parentFile?.mkdirs()
+        src.copyTo(dst, overwrite = true)
+        true
+    } catch (e: Exception) {
+        Log.w(TAG, "could not copy $src to $dst", e)
+        false
+    }
+
+    /**
+     * One entry from [from]'s desktop dir into [home]'s, under a free name (a clash gets " (2)",
+     * " (3)"…). The icon PNGs and the cover follow and the entry is repointed at them; the originals
+     * are deleted only after the new entry is written.
+     */
+    private fun moveEntry(from: Container, home: Container, file: File, text: String): Boolean {
+        val destDir = home.desktopDir
+        if (!destDir.isDirectory && !destDir.mkdirs()) return false
+        val oldBase = file.name.removeSuffix(".desktop")
+        var base = oldBase
+        var n = 2
+        while (File(destDir, "$base.desktop").exists()) base = "$oldBase ($n)".also { n++ }
+
+        val movedIcons = ArrayList<File>()
+        var newIcon: String? = null
+        AndroidGameEntry.iconOf(text)?.let { icon ->
+            for (size in intArrayOf(64, 48, 32, 16)) {
+                val src = File(from.getIconsDir(size), "$icon.png")
+                if (src.isFile && copy(src, File(home.getIconsDir(size), "$base.png"))) {
+                    movedIcons += src
+                    newIcon = base
+                }
+            }
+        }
+        var oldCover: File? = null
+        var newCover: String? = null
+        AndroidGameEntry.extraOf(text, "customCoverArtPath")?.let { path ->
+            val src = File(path)
+            val dst = File(home.rootDir, "app_data/cover_arts/$base.png")
+            if (src.isFile && copy(src, dst)) {
+                oldCover = src
+                newCover = dst.path
+            }
+        }
+        val target = File(destDir, "$base.desktop")
+        if (!FileUtils.writeString(target, AndroidGameEntry.retarget(text, newIcon, newCover))) {
+            Log.w(TAG, "could not write $target")
+            return false
+        }
+        file.delete()
+        movedIcons.forEach { it.delete() }
+        // Only a cover that lived in the source container is ours to delete.
+        oldCover?.takeIf { it.path.startsWith(from.rootDir.path) }?.delete()
+        Log.i(TAG, "moved '${file.name}' from container ${from.id} to the Android games home as '$base'")
+        return true
+    }
 
     /** Portrait 2:3 tile the Games card crops to, the app icon centred on it. */
     private const val TILE_W = 360
@@ -111,9 +256,9 @@ object AndroidGames {
     }
 
     /**
-     * Writes the Games-list entry for [app] into [container]'s desktop dir, with the app's icon as
-     * the card art (Icon= PNG) and the cover. A name already taken by another game gets
-     * " (Android)" so a Windows copy of the same title is never overwritten. Blocking.
+     * Writes the Games-list entry for [app] into [container]'s desktop dir — the home, see
+     * [homeContainer] — with the app's icon as the card art (Icon= PNG) and the cover. A name
+     * already taken gets " (Android)" so an existing entry is never overwritten. Blocking.
      * Returns the new `.desktop`, or null if it could not be written.
      */
     fun addToShortcuts(context: Context, container: Container, app: InstalledApp): File? {
@@ -147,6 +292,18 @@ object AndroidGames {
         }
         Log.i(TAG, "added ${app.packageName} as '$base' in container ${container.id}")
         return file
+    }
+
+    /**
+     * Drops a removed entry's tile and cover from the home. Nothing else uses them, and a re-add of
+     * the same app under the same name writes fresh ones. Only files inside the home are touched.
+     */
+    fun deleteArt(shortcut: Shortcut) {
+        val home = shortcut.container ?: return
+        if (!isHome(home)) return
+        val root = home.rootDir?.path ?: return
+        shortcut.iconFile?.takeIf { it.isFile && it.path.startsWith(root) }?.delete()
+        shortcut.customCoverArtPath?.takeIf { it.startsWith(root) }?.let { File(it).delete() }
     }
 
     fun isInstalled(context: Context, pkg: String): Boolean = try {

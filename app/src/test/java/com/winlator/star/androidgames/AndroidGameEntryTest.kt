@@ -50,6 +50,22 @@ class AndroidGameEntryTest {
         assertNull(AndroidGameEntry.packageOf("[Desktop Entry]\nstoreSource=android\nandroidPackage=x.y\n"))
     }
 
+    @Test fun retarget_repointsIconAndCover_keepsTheRest() {
+        val text = AndroidGameEntry.desktopEntry("Minecraft", "com.mojang.minecraftpe", null, "Minecraft") +
+            "customCoverArtPath=/data/c1/app_data/cover_arts/Minecraft.png\nuuid=abc\n"
+        assertEquals("Minecraft", AndroidGameEntry.iconOf(text))
+        assertEquals("/data/c1/app_data/cover_arts/Minecraft.png", AndroidGameEntry.extraOf(text, "customCoverArtPath"))
+
+        val moved = AndroidGameEntry.retarget(text, "Minecraft (2)", "/data/home/app_data/cover_arts/Minecraft (2).png")
+        assertEquals("Minecraft (2)", AndroidGameEntry.iconOf(moved))
+        assertEquals("/data/home/app_data/cover_arts/Minecraft (2).png", AndroidGameEntry.extraOf(moved, "customCoverArtPath"))
+        assertEquals("com.mojang.minecraftpe", AndroidGameEntry.packageOf(moved))
+        assertEquals("abc", AndroidGameEntry.extraOf(moved, "uuid"))
+
+        // Nulls leave the lines alone.
+        assertEquals(text, AndroidGameEntry.retarget(text, null, null))
+    }
+
     @Test fun safeName_stripsPathCharacters() {
         assertEquals("Asphalt_ Legends", AndroidGameEntry.safeName("Asphalt: Legends", "com.gameloft.a9"))
         assertEquals("com.gameloft.a9", AndroidGameEntry.safeName("   ", "com.gameloft.a9"))

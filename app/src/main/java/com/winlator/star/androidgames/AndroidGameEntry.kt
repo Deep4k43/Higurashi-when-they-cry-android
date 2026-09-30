@@ -4,7 +4,7 @@ package com.winlator.star.androidgames
  * The on-disk shape of an Android game in the Games list, kept free of Android classes so it can be
  * unit-tested on the JVM. An Android game is an ordinary `.desktop` shortcut — that is what the
  * Games tab, the XMB view and Big Picture all list — tagged `storeSource=android` with the package
- * to start. Nothing about it involves Wine: the launch paths check [isAndroid] first and hand the
+ * to start. It lives in the app's own `files/android-games/` home, never in a container. Nothing about it involves Wine: the launch paths check [isAndroid] first and hand the
  * package to Android instead of opening a session.
  */
 object AndroidGameEntry {
@@ -47,6 +47,46 @@ object AndroidGameEntry {
             if (!activity.isNullOrEmpty()) append(EXTRA_ACTIVITY).append('=').append(activity).append('\n')
             append("eos=0\n")
         }
+
+    /** The `Icon=` name of an entry's [Desktop Entry] section, or null when it has none. */
+    fun iconOf(desktopText: String): String? = valueOf(desktopText, "Desktop Entry", "Icon")
+
+    /** One `[Extra Data]` value of an entry, or null when it is absent or empty. */
+    fun extraOf(desktopText: String, key: String): String? = valueOf(desktopText, "Extra Data", key)
+
+    private fun valueOf(desktopText: String, wantSection: String, wantKey: String): String? {
+        var section = ""
+        for (raw in desktopText.lineSequence()) {
+            val line = raw.trim()
+            if (line.startsWith("[")) { section = line.substringAfter('[').substringBefore(']'); continue }
+            if (section != wantSection) continue
+            val eq = line.indexOf('=')
+            if (eq > 0 && line.substring(0, eq) == wantKey) return line.substring(eq + 1).takeIf { it.isNotEmpty() }
+        }
+        return null
+    }
+
+    /**
+     * The same entry pointed at a moved icon and cover: `Icon=` becomes [iconName] and
+     * `customCoverArtPath` becomes [coverPath]; a null leaves that line as it was. Everything else -
+     * the package and the uuid a home-screen pin was made with - is kept verbatim.
+     */
+    fun retarget(desktopText: String, iconName: String?, coverPath: String?): String {
+        var section = ""
+        val out = StringBuilder()
+        for (raw in desktopText.lines()) {
+            val line = raw.trim()
+            if (line.startsWith("[")) section = line.substringAfter('[').substringBefore(']')
+            val replaced = when {
+                iconName != null && section == "Desktop Entry" && line.startsWith("Icon=") -> "Icon=$iconName"
+                coverPath != null && section == "Extra Data" && line.startsWith("customCoverArtPath=") ->
+                    "customCoverArtPath=$coverPath"
+                else -> raw
+            }
+            out.append(replaced).append('\n')
+        }
+        return out.toString().trimEnd('\n') + "\n"
+    }
 
     /**
      * The package an entry's text names, or null when it is not an Android game. Reads the same
