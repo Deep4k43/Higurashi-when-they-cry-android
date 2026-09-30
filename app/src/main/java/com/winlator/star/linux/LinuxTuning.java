@@ -99,7 +99,7 @@ public final class LinuxTuning {
      * breaks games: Steam Input takes the pad ({@code uses xinput : true} in Steam's controller log)
      * and the virtual pad it hands the game never arrives. Its scaling is offered on its own instead
      * ({@link #EXTRA_SCALER}, {@link #EXTRA_FILTER}); a frame cap is the in-game drawer's FPS limit.
-     * Only {@code -steamdeck} is passed and never {@code -steamos3}; the session script says why.
+     * Deck mode passes {@code -steamdeck -steamos3}, as SteamOS does; the session script says why.
      * {@link #EXTRA_PROOT_NO_SECCOMP} is off: it takes away something proot does on purpose, for a device where it misbehaves.
      * {@link #EXTRA_NO_XALIA} is on, so xalia is skipped unless the entry turns the switch off.
      * xalia is an x86 program Proton starts beside every game for gamepad navigation the session already has, and under FEX it costs each game a slice of a core (about 10% of one beside Once Upon a KATAMARI on an SD 8 Gen 2).

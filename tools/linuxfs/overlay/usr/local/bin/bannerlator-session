@@ -448,17 +448,18 @@ BUSCONF
       -cef-use-gl=angle -cef-use-angle=vulkan)
     # SteamOS runs its own session as `steam -gamepadui -steamos3 -steamdeck`, which is the shape Valve tunes Big Picture for.
     # The app sets BL_STEAMDECK from the Steam Deck mode switch in the entry's settings.
-    # Only -steamdeck is passed, never -steamos3.
-    # -steamos3 makes the client manage itself as SteamOS does, and it calls steamos-select-branch, which is not in this rootfs.
-    # Deck mode on its own still opts the install into the steamdeck_stable client branch, written to package/beta during the run (seen on device: publicbeta at start, steamdeck_stable after the client's own update restart).
+    # Deck mode passes both flags, as SteamOS does.
+    # -steamdeck puts the Quick Access Menu and the Deck settings pages on screen, and the Quick Access Menu's performance overlay controls stay greyed out without -steamos3.
+    # -steamos3 makes the client manage itself as SteamOS does, and the SteamOS helpers it calls (steamos-select-branch, steamos-update, the polkit helpers) are staged as no-op stubs under /usr/bin.
+    # Deck mode opts the install into the steamdeck_stable client branch, written to package/beta during the run (seen on device: publicbeta at start, steamdeck_stable after the client's own update restart).
     # That branch outlives the setting, and it then loses to the -clientbeta above on every launch.
     # The updater reads the forced branch, finds "installed version 0" against a package set installed from the other one, marks an update pending and exits 42 to apply it - which never happens, so the client restarts for ever.
-    # Each of those restarts tears the client down under a running game and takes Steam Input with it, which is a game left running with no controller.
+    # The loop below puts package/beta back before every start, which is what keeps that from happening.
     if [ "${BL_STEAMDECK:-0}" = 1 ]; then
-      steam_args+=(-steamdeck)
+      steam_args+=(-steamdeck -steamos3)
       # The Quick Access Menu's Scaling Filter lists NVIDIA Image Scaling only when it is told gamescope has it, and this gamescope does.
       export STEAM_GAMESCOPE_NIS_SUPPORTED=1
-      echo "== steam: Deck mode on (-steamdeck)"
+      echo "== steam: Deck mode on (-steamdeck -steamos3)"
     fi
     # What a killed session leaves behind is cleared here, while no client or web helper is running.
     # Android ends sessions without warning (backgrounding, the low-memory killer), and the next client then finds .crash and opens its update screen on the spinner.
