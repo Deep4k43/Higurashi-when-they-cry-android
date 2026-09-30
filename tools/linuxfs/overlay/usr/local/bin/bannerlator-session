@@ -449,6 +449,29 @@ BUSCONF
     # A session that keeps restarting looks to the user like a menu that opens and closes by itself, and the game it was launched over loses its controller each time.
     steam_updates=0
     steam_beta=$steam_root/package/beta
+    # When the session is being stopped, the app asks for a clean exit by writing $BL_LIVE_DIR/steam-stop, and the client is shut down with its own -shutdown switch instead of being killed with the session.
+    # A killed client leaves .crash behind and loses whatever it had not yet written, such as cloud sync state and the library it had just changed.
+    # steam-stop-ready tells the app a watcher is listening, so a session that never got this far is torn down at once instead of waiting on a request nobody reads.
+    # (From Droid-Deck/DroidDeck #68.)
+    rm -f "$HOME/.bl-stop-requested"
+    if [ -n "${BL_LIVE_DIR:-}" ] && [ -d "$BL_LIVE_DIR" ]; then
+      rm -f "$BL_LIVE_DIR/steam-stop"
+      (
+        script=$$
+        while kill -0 "$script" 2>/dev/null; do
+          if [ -e "$BL_LIVE_DIR/steam-stop" ]; then
+            rm -f "$BL_LIVE_DIR/steam-stop"
+            : > "$HOME/.bl-stop-requested"
+            echo "== steam: the app asked for a clean exit"
+            "$steam_root/steamrtarm64/steam" -shutdown >/dev/null 2>&1 || true
+            exit 0
+          fi
+          sleep 0.5
+        done
+      ) &
+      stop_watcher=$!
+      : > "$BL_LIVE_DIR/steam-stop-ready"
+    fi
     while :; do
       rm -f "$HOME/.bl-restart-once"
       # The branch on disk has to agree with the one forced on the command line, and it is checked before every start rather than once.
@@ -463,6 +486,11 @@ BUSCONF
       rc=$?
       echo "== steam exited rc=$rc"
       collect_steam_logs
+      # A clean exit the app asked for ends the session here, whatever the client's exit code or a pending restart says.
+      if [ -f "$HOME/.bl-stop-requested" ]; then
+        rm -f "$HOME/.bl-stop-requested" "$HOME/.bl-restart-once"
+        break
+      fi
       # 42 = the client updated itself; the marker = the session asked for one restart after the
       # compatibility layer landed. The URL arguments are not repeated: they were acted on.
       if [ -f "$HOME/.bl-restart-once" ]; then set --; continue; fi
@@ -474,6 +502,12 @@ BUSCONF
       fi
       set --
     done
+    # The client is down: the app stops waiting on it once the marker is gone.
+    if [ -n "${stop_watcher:-}" ]; then
+      rm -f "$BL_LIVE_DIR/steam-stop-ready"
+      kill "$stop_watcher" 2>/dev/null || true
+      wait "$stop_watcher" 2>/dev/null || true
+    fi
     kill ${netmanager:-} ${system_bus:-} 2>/dev/null || true
     reap_orphans
     exit "$rc"

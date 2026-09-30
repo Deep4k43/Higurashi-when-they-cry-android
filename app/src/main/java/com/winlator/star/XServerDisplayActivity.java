@@ -5341,7 +5341,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // Stop the session foreground service (also removes its ongoing notification).
         stopService(new Intent(this, com.winlator.star.core.GameSessionForegroundService.class));
         preloaderDialog.showOnUiThread(R.string.shutdown);
-        handler.postDelayed(new Runnable() {
+        final Runnable teardown = new Runnable() {
             @Override
             public void run() {
                 savePlaytimeData(); // Save on destroy
@@ -5477,7 +5477,28 @@ public class XServerDisplayActivity extends AppCompatActivity {
                     }
                 }, "BH-ExitSaveBackup").start();
             }
-        }, 1000);
+        };
+        // A Linux session's Steam client is asked to shut down by itself first, so it is not killed mid-write and does not open on its update screen next time.
+        // The wait runs on a worker, and the teardown keeps the same one-second floor it always had; the teardown still kills whatever is left.
+        // With nothing listening in the session (it never reached the client), the teardown is posted exactly as before.
+        final com.winlator.star.linux.LinuxProgramLauncherComponent linuxLauncher = gamescopeMode && environment != null
+                ? environment.getComponent(com.winlator.star.linux.LinuxProgramLauncherComponent.class) : null;
+        final File steamStopDir = linuxLiveDir;
+        if (linuxLauncher != null && steamStopDir != null && linuxLauncher.steamStopArmed(steamStopDir)) {
+            final long teardownAt = android.os.SystemClock.uptimeMillis() + 1000;
+            preloaderDialog.hint("Closing the Steam client…");
+            new Thread(() -> {
+                try {
+                    linuxLauncher.askSteamToExit(steamStopDir);
+                } catch (Throwable t) {
+                    Log.w("XServerDisplayActivity", "asking the Steam client to exit failed", t);
+                } finally {
+                    handler.postAtTime(teardown, teardownAt);
+                }
+            }, "linux-steam-stop").start();
+        } else {
+            handler.postDelayed(teardown, 1000);
+        }
     }
 
     /**
@@ -9366,6 +9387,11 @@ public class XServerDisplayActivity extends AppCompatActivity {
         // session script and the Proton wrappers read these files, so they start from the entry's settings.
         linuxLiveDir = new File(getFilesDir(), "linux-session/live");
         com.winlator.star.linux.LinuxTuning.writeLive(linuxLiveDir, shortcut);
+        // A killed session leaves its clean-exit markers behind, and a stale one would have the next exit wait on a watcher that is not there yet.
+        //noinspection ResultOfMethodCallIgnored
+        new File(linuxLiveDir, "steam-stop").delete();
+        //noinspection ResultOfMethodCallIgnored
+        new File(linuxLiveDir, "steam-stop-ready").delete();
         guest.add("BL_LIVE_DIR=" + linuxLiveDir.getPath());
         // HDR10: startWaylandCompositor opened the compositor's HDR gate for this session (the entry's
         // HDR output setting, on a screen that lists HDR10). gamescope then needs --hdr-enabled to offer
