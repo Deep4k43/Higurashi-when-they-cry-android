@@ -7833,7 +7833,8 @@ internal fun ShortcutSettingsDialogScreen(
                                 onSelect = { linuxTurnipSysmem = com.winlator.star.linux.LinuxTuning.TU_SYSMEM_CHOICES[sysmemLabels.indexOf(it).coerceAtLeast(0)] }
                             )
                             Text(
-                                "Only for a device that misbehaves. Xalia off is for a game that crash-loops at start (one Galaxy Fold). "
+                                "Xalia off is on by default: xalia costs every game CPU time under FEX, so turn it off only for a game that needs its gamepad navigation. "
+                                    + "The others are only for a device that misbehaves. "
                                     + "proot without seccomp is slower, for a device whose seccomp gets in the way. "
                                     + "Sysmem rendering is what the A710/A720/A722 driver builds need; Automatic turns it on for those imports. "
                                     + "A TU_DEBUG in the env vars below wins.",

@@ -163,6 +163,9 @@ struct client_info {
     /* An OpenGL program whose EGL gave up on the GPU: it asked for dma-buf feedback (EGL's
      * Wayland GPU path always does), never made a dma-buf buffer, and draws wl_shm frames. */
     unsigned asked_feedback : 1, shm_gl_said : 1;
+    /* Clients that describe opaque regions can use alpha outside those regions. Wine windows
+     * never describe them, and their unused alpha channel must not make them translucent. */
+    unsigned declares_opaque : 1;
     unsigned dmabuf_buffers, shm_frames;
     struct client_info *next;
 };
@@ -241,6 +244,8 @@ struct surface {
     struct dmabuf_buffer *dmabuf_buf;       /* its imported image, kept until replaced or the surface goes */
     struct wl_listener dmabuf_destroy;
     int buf_w, buf_h, has_content;
+    int buf_alpha;
+    int opaque[4], pending_opaque[4], pending_opaque_set; /* x, y, w, h; w = 0: none */
     int src_set, dst_set;
     float src[4];
     int dst[2];
@@ -436,7 +441,7 @@ static int on_release_timer(int fd, uint32_t mask, void *data) {
     return 0;
 }
 
-/* Give a replaced buffer back to its client: now, or on the limiter's cadence.
+/* Give a replaced buffer back to its client on the limiter's cadence, or the screen's when there is no limit.
  *
  * Each release takes the next slot of a per-surface cadence (one slot per interval), so a game
  * gets one buffer back per interval however fast it commits. The schedule is kept honest at both
@@ -447,9 +452,15 @@ static int on_release_timer(int fd, uint32_t mask, void *data) {
  * delivered (a swapchain rebuild destroys buffers with queued releases) or that a coarser earlier
  * limit had spaced out, and the game's first frames after that waited on empty slots. */
 static void release_buffer(struct surface *s, struct wl_resource *buffer, int64_t since_ns) {
-    int limit = g_fps_limit;
-    if (limit <= 0 || g_release_timer_fd < 0) { wl_buffer_send_release(buffer); perf_note_release(since_ns); return; }
-    int64_t interval = 1000000000LL / limit, now = now_ns();
+    const int limit = g_fps_limit;
+    /* Without a limit of its own a game is paced to the screen's measured refresh.
+     * A swapchain that does not wait for frame callbacks (MAILBOX, IMMEDIATE) is held back by nothing else here.
+     * Handing a replaced buffer straight back let it draw as fast as the GPU allowed, and everything above the refresh rate was thrown away (178 frames a second for 91 on screen, measured in WinNative).
+     * One release per refresh is the back-pressure X11 gives, and the screen shows the same frames either way.
+     * With a limit set the cadence is the limit's, exactly as before. (From Droid-Deck/DroidDeck #84.) */
+    const int64_t interval = limit > 0 ? 1000000000LL / limit : g_refresh_ns;
+    if (interval <= 0 || g_release_timer_fd < 0) { wl_buffer_send_release(buffer); perf_note_release(since_ns); return; }
+    int64_t now = now_ns();
     int64_t at = s->next_release_ns + interval;
     int64_t latest = now + interval * (int64_t)(s->releases_pending + 1);
     if (at < now) at = now;
@@ -759,6 +770,7 @@ static void take_shm(struct surface *s, struct wl_shm_buffer *shm, struct wl_res
     wl_buffer_send_release(buffer);
     s->buf_w = w;
     s->buf_h = h;
+    s->buf_alpha = wl_shm_buffer_get_format(shm) == WL_SHM_FORMAT_ARGB8888;
     s->has_content = s->shm_img != NULL;
     g_stat_shm++;
     struct client_info *ci = client_info_of(wl_resource_get_client(s->resource));
@@ -805,6 +817,7 @@ static void take_dmabuf(struct surface *s, struct dmabuf_buffer *b, struct wl_re
     if (s->shm_img) { vkp_image_destroy(s->shm_img); s->shm_img = NULL; }
     s->buf_w = b->width;
     s->buf_h = b->height;
+    s->buf_alpha = (b->format & 0xff) == 'A';
     s->has_content = b->img != NULL;
     g_stat_dmabuf++;
     if (!s->announced_vulkan) {
@@ -967,8 +980,27 @@ static void surface_frame(struct wl_client *c, struct wl_resource *r, uint32_t c
     wl_resource_set_implementation(callback, NULL, NULL, frame_callback_destroy);
     wl_list_insert(s->pending_frames.prev, wl_resource_get_link(callback));
 }
+/* The bounding box serves pointer confinement. The exact flag also tells opaque-region handling
+ * whether the bounding box itself is the whole region. */
+struct region { int set, exact; int x, y, w, h; };
+
+/* A wl_surface's opaque region is pending until its next commit. An exact region that covers
+ * the surface lets the blit path keep handling an otherwise alpha-capable buffer. */
 static void surface_set_opaque(struct wl_client *c, struct wl_resource *r,
-                               struct wl_resource *region) {}
+                               struct wl_resource *region) {
+    struct surface *s = wl_resource_get_user_data(r);
+    struct region *rg = region ? wl_resource_get_user_data(region) : NULL;
+    memset(s->pending_opaque, 0, sizeof(s->pending_opaque));
+    s->pending_opaque_set = 1;
+    if (rg && rg->set && rg->exact) {
+        s->pending_opaque[0] = rg->x;
+        s->pending_opaque[1] = rg->y;
+        s->pending_opaque[2] = rg->w;
+        s->pending_opaque[3] = rg->h;
+    }
+    struct client_info *ci = client_info_of(c);
+    if (ci) ci->declares_opaque = 1;
+}
 static void surface_set_input(struct wl_client *c, struct wl_resource *r,
                               struct wl_resource *region) {}
 
@@ -985,6 +1017,10 @@ static void surface_commit(struct wl_client *c, struct wl_resource *r) {
         s->dst_set = s->pending_dst[0] > 0;
         memcpy(s->dst, s->pending_dst, sizeof(s->dst));
         s->pending_dst_set = 0;
+    }
+    if (s->pending_opaque_set) {
+        memcpy(s->opaque, s->pending_opaque, sizeof(s->opaque));
+        s->pending_opaque_set = 0;
     }
 
     if (s->pending_attach) {
@@ -1126,24 +1162,29 @@ static void surface_resource_destroy(struct wl_resource *r) {
 
 /* ------------------------------------------------------------------ wl_region */
 
-/* A region is kept as the bounding box of its rectangles: enough for pointer confinement,
- * where winewayland sends one rectangle (the ClipCursor area). Subtractions are ignored. */
-struct region { int set; int x, y, w, h; };
-
 static void region_destroy(struct wl_client *c, struct wl_resource *r) { wl_resource_destroy(r); }
 static void region_add(struct wl_client *c, struct wl_resource *r,
                        int32_t x, int32_t y, int32_t w, int32_t h) {
     struct region *rg = wl_resource_get_user_data(r);
     if (!rg || w <= 0 || h <= 0) return;
-    if (!rg->set) { rg->x = x; rg->y = y; rg->w = w; rg->h = h; rg->set = 1; return; }
-    int x2 = rg->x + rg->w > x + w ? rg->x + rg->w : x + w;
-    int y2 = rg->y + rg->h > y + h ? rg->y + rg->h : y + h;
+    if (!rg->set) { rg->x = x; rg->y = y; rg->w = w; rg->h = h; rg->set = rg->exact = 1; return; }
+    long long x2 = (long long)rg->x + rg->w, y2 = (long long)rg->y + rg->h;
+    long long nx2 = (long long)x + w, ny2 = (long long)y + h;
+    int inside = x >= rg->x && y >= rg->y && nx2 <= x2 && ny2 <= y2;
+    int around = x <= rg->x && y <= rg->y && nx2 >= x2 && ny2 >= y2;
+    if (!inside && !around) rg->exact = 0;
+    if (nx2 > x2) x2 = nx2;
+    if (ny2 > y2) y2 = ny2;
     if (x < rg->x) rg->x = x;
     if (y < rg->y) rg->y = y;
-    rg->w = x2 - rg->x; rg->h = y2 - rg->y;
+    rg->w = (int)(x2 - rg->x > INT32_MAX ? INT32_MAX : x2 - rg->x);
+    rg->h = (int)(y2 - rg->y > INT32_MAX ? INT32_MAX : y2 - rg->y);
 }
 static void region_subtract(struct wl_client *c, struct wl_resource *r,
-                            int32_t x, int32_t y, int32_t w, int32_t h) {}
+                            int32_t x, int32_t y, int32_t w, int32_t h) {
+    struct region *rg = wl_resource_get_user_data(r);
+    if (rg && w > 0 && h > 0) rg->exact = 0;
+}
 static void region_resource_destroy(struct wl_resource *r) { free(wl_resource_get_user_data(r)); }
 static const struct wl_region_interface region_impl = {
     .destroy = region_destroy,
@@ -1867,6 +1908,17 @@ static void note_hdr_unimported(const struct draw_list *dl, struct surface *s, i
     g_hdr_unimported_below = dl->n;
 }
 
+/* A client that describes opaque regions can intentionally leave part of an alpha buffer see-through.
+ * Gamescope uses this for its full-size Steam notification and overlay planes. */
+static int surface_translucent(const struct surface *s, int w, int h) {
+    if (!s->buf_alpha) return 0;
+    const struct client_info *ci = client_info_of(wl_resource_get_client(s->resource));
+    if (!ci || !ci->declares_opaque) return 0;
+    const int *o = s->opaque;
+    return !(o[2] > 0 && o[0] <= 0 && o[1] <= 0 &&
+             (long long)o[0] + o[2] >= w && (long long)o[1] + o[3] >= h);
+}
+
 static void add_surface(struct draw_list *dl, struct surface *s, int ox, int oy) {
     struct vkp_image *img = surface_image(s);
     float sx = 0, sy = 0, sw = (float)s->buf_w, sh = (float)s->buf_h;
@@ -1886,7 +1938,8 @@ static void add_surface(struct draw_list *dl, struct surface *s, int ox, int oy)
         dl->d = d;
         dl->cap = cap;
     }
-    dl->d[dl->n++] = (struct vkp_draw){img, sx, sy, sw, sh, ox, oy, dw, dh};
+    dl->d[dl->n++] = (struct vkp_draw){img, sx, sy, sw, sh, ox, oy, dw, dh,
+                                      surface_translucent(s, dw, dh)};
     s->drawn = 1;
 }
 
@@ -1957,6 +2010,7 @@ static int on_frame_timer(void *data) {
 static int layer_candidate(const struct draw_list *dl, int scene_w, int scene_h) {
     for (int i = dl->n - 1; i >= 0 && i >= dl->n - 2; i--) {
         const struct vkp_draw *d = &dl->d[i];
+        if (d->blend) continue; /* the translucent plane must not replace the opaque game layer */
         if (!vkp_image_is_dmabuf(d->img)) continue;
         if (d->dx != 0 || d->dy != 0 || d->dw != scene_w || d->dh != scene_h) continue;
         if (d->sx != 0 || d->sy != 0 || (int)d->sw != vkp_image_width(d->img) ||
@@ -2295,7 +2349,7 @@ static void render_scene(void) {
              * its own layer, cropped and placed by the display. */
             int go[8], ov = 0;
             if (over == 1 && li >= 0 && vkp_map_draw(&dl.d[li + 1], go))
-                ov = sc_layer_present_overlay(dl.d[li + 1].img, go) == 0 ? 1 : -1;
+                ov = sc_layer_present_overlay(dl.d[li + 1].img, go, dl.d[li + 1].blend) == 0 ? 1 : -1;
             if (ov <= 0) sc_layer_hide_overlay();
             if (ov < 0) { /* the overlay layer refused it: draw the whole scene the old way */
                 sc_layer_hide();
