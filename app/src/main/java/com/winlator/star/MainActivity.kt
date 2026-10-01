@@ -9,6 +9,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
+import android.util.Log
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -62,6 +63,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import com.winlator.star.core.UpdateManager
 import androidx.compose.runtime.rememberCoroutineScope
+import com.winlator.star.box64.Box64Preset
+import com.winlator.star.container.Container
+import com.winlator.star.contents.WrapperManager
+import com.winlator.star.core.StringUtils
+import com.winlator.star.core.WineInfo
+import com.winlator.star.core.WinePath
+import com.winlator.star.fexcore.FEXCorePreset
 import com.winlator.star.ui.LocalTopBarActions
 import com.winlator.star.ui.LocalTopBarOverlayInset
 import com.winlator.star.ui.LocalTopBarTransparent
@@ -93,8 +101,12 @@ import com.winlator.star.ui.screens.SplashScreen
 import com.winlator.star.ui.screens.SplashViewModel
 import com.winlator.star.ui.theme.AppThemeState
 import com.winlator.star.ui.theme.WinlatorTheme
+import com.winlator.star.util.ContainerExeRunner
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
+import java.util.concurrent.Executors
+import org.json.JSONObject
 
 class MainActivity : AppCompatActivity() {
 
@@ -107,6 +119,28 @@ class MainActivity : AppCompatActivity() {
         /** String extra: a Screen route to open (e.g. Screen.Games.route). Used by
          *  the store activities' "Open Shortcuts" action to deep-link back here. */
         const val EXTRA_OPEN_SCREEN = "open_screen"
+
+        /** Display label of the preset graphics driver. The container's `graphicsDriver` id is
+         *  [StringUtils.parseIdentifier] of this label (i.e. `wrapper-enhanced`), and the archive
+         *  staged from assets lands at filesDir/graphics_driver/<that id>.tzst. */
+        const val PRESET_WRAPPER_LABEL = "Wrapper Enhanced (Turnip-Mali-G57-beta_1.1.0)"
+
+        /** Wine-side path of the executable the app boots straight into on launch. */
+        const val TARGET_EXECUTABLE_PATH =
+            "D:\\MY GAMES\\Higurashi When They Cry Hou - Ch.1 Onikakushi\\HigurashiEp01.exe"
+
+        /** Pref holding [TARGET_EXECUTABLE_PATH] once the preset container exists. */
+        const val TARGET_EXECUTABLE_KEY = "target_executable_path"
+        /** Pref gating the boot-straight-into-the-game behaviour (default ON). */
+        const val AUTO_LAUNCH_KEY = "auto_launch_on_start"
+        /** Pref remembering which container owns the auto-launch target. */
+        const val TARGET_CONTAINER_KEY = "target_container_id"
+
+        /** How long onCreate's auto-launch waiter keeps polling for install/permission/container. */
+        const val AUTO_LAUNCH_WAIT_MS = 5L * 60L * 1000L
+
+        const val TAG = "MainActivity"
+
         @JvmField val CONTAINER_PATTERN_COMPRESSION_LEVEL: Byte = 9
         @JvmField var PACKAGE_NAME: String = ""
     }
@@ -130,6 +164,14 @@ class MainActivity : AppCompatActivity() {
     // Route requested via EXTRA_OPEN_SCREEN on a relaunch (onNewIntent); consumed
     // by AppShell, which navigates to it and clears it.
     private val pendingRoute = mutableStateOf<String?>(null)
+
+    // One-shot gate for the boot-straight-into-the-game waiter: set the moment the preset target
+    // has been launched (or found to be unlaunchable), so a later recomposition can't re-fire it.
+    private val autoLaunchAttempted = mutableStateOf(false)
+
+    // One-shot gate for preset container creation: creation needs a finished imagefs install, and
+    // createContainer() is expensive (prefix pack + common DLLs), so at most one attempt per process.
+    private val containerCreationAttempted = mutableStateOf(false)
 
     // ---- Settings-side Controller Test (Input Controls screen) input fork ----
     // While the at-rest controller-test dialog is open in TEST mode a game controller's key/axis events
@@ -187,6 +229,10 @@ class MainActivity : AppCompatActivity() {
 
         containerManager = ContainerManager(this)
 
+        // Stage the preset graphics driver (assets -> filesDir/graphics_driver import) before the
+        // container that points at it is created, so the id is resolvable on the very first launch.
+        stagePresetGraphicsDriver()
+
         val selectedMenuItemId = intent.getIntExtra("selected_menu_item_id", 0)
         val startRoute = validRouteOrNull(intent.getStringExtra(EXTRA_OPEN_SCREEN))
             ?: menuItemIdToRoute(selectedMenuItemId)
@@ -198,6 +244,9 @@ class MainActivity : AppCompatActivity() {
 
         val willInstall = splashViewModel.installIfNeeded(this)
         if (!willInstall) {
+            // imagefs is already installed, so the preset prefix can be laid down right away.
+            // (During an install this is deferred to the auto-launch waiter — see below.)
+            createDefaultContainerIfNeeded()
             // Already installed — request permissions immediately
             requestAppPermissions()
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R && !Environment.isExternalStorageManager()) {
@@ -296,6 +345,11 @@ class MainActivity : AppCompatActivity() {
 
                     // Compose-based preloader overlay — replaces XML PreloaderDialog
                     PreloaderOverlay()
+
+                    // Boot straight into the preset target: the container list below is only the
+                    // fallback for the cases this waiter can't get past (imagefs install still
+                    // running, All Files Access not granted yet, or the exe missing on disk).
+                    LaunchedEffect(Unit) { awaitAndLaunchTarget() }
                 }
             }
         }
@@ -341,6 +395,154 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Creates the preset container exactly once per process, and only once the imagefs install has
+     * finished: [ContainerManager.createContainer] extracts `<wine>_container_pattern.tzst` or the
+     * imagefs `prefixPack.txz` plus the common DLL layers, so a first-run attempt during install
+     * would fail and delete the freshly-made container directory. Called from onCreate when nothing
+     * is installing, and from [awaitAndLaunchTarget] the moment an in-flight install completes.
+     */
+    private fun createDefaultContainerIfNeeded() {
+        if (containerCreationAttempted.value) return
+        if (containerManager.getContainers().isNotEmpty()) {
+            containerCreationAttempted.value = true
+            return
+        }
+        containerCreationAttempted.value = true
+        createDefaultContainer()
+    }
+
+    /**
+     * First-run container for the Higurashi Ch.1 auto-launch target:
+     * 1280x720 on the X11 display backend, the "Wrapper Enhanced" graphics driver, DXVK
+     * 1.7.2-async (+VKD3D 2.8), Box64 0.3.7 and FEXCore 2505-0 with the performance presets.
+     * On success the Wine-side path of the game exe (and the auto-launch switch) is persisted so
+     * every cold start can boot straight into it.
+     */
+    private fun createDefaultContainer() {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+
+        val json = JSONObject().apply {
+            put("name", "Higurashi Ch.1")
+            put("screenSize", "1280x720")
+            // Display: X11 (the container default, written explicitly so the preset owns it).
+            put("extraData", JSONObject().apply {
+                put("displayBackend", Container.DISPLAY_BACKEND_X11)
+                put("autoCloseOnExit", "1")
+            })
+            put("graphicsDriver", StringUtils.parseIdentifier(PRESET_WRAPPER_LABEL))
+            put("graphicsDriverConfig", Container.DEFAULT_GRAPHICSDRIVERCONFIG)
+            put("dxwrapper", Container.DEFAULT_DXWRAPPER)
+            // version= drives the asset lookup (assets/dxwrapper/dxvk-<version>.tzst) and the
+            // async flag; vkd3dVersion/ddrawrapper are mandatory — a missing one makes the DX
+            // wrapper extraction build a "vkd3d-null" id and bail out.
+            put(
+                "dxwrapperConfig",
+                "version=1.7.2-async,vkd3dVersion=2.8,vkd3dLevel=12_1,ddrawrapper=none," +
+                    "async=1,asyncCache=0,framerate=0,csmt=3"
+            )
+            put("wineVersion", WineInfo.MAIN_WINE_VERSION.identifier())
+            put("emulator", "fexcore")
+            put("box64Version", "0.3.7")
+            put("fexcoreVersion", "2505-0")
+            put("box64Preset", Box64Preset.PERFORMANCE)
+            put("fexcorePreset", FEXCorePreset.PERFORMANCE)
+            put("audioDriver", Container.DEFAULT_AUDIO_DRIVER)
+            put("drives", Container.DEFAULT_DRIVES)
+            put("cpuList", "0-7")
+            put("renderer", "vulkan")
+            put("rendererPresentMode", "fifo")
+            put("runAsAdmin", true)
+        }
+
+        containerManager.createContainerAsync(json, null) { container ->
+            if (container != null) {
+                prefs.edit()
+                    .putString(TARGET_EXECUTABLE_KEY, TARGET_EXECUTABLE_PATH)
+                    .putBoolean(AUTO_LAUNCH_KEY, true)
+                    .putInt(TARGET_CONTAINER_KEY, container.id)
+                    .apply()
+            }
+        }
+    }
+
+    /**
+     * Stage the preset graphics driver from assets as a user import (filesDir/graphics_driver/
+     * <id>.tzst + its .meta sidecar) — the extraction path only resolves an unknown driver id
+     * through that exact file, and the import also gives the driver its label in the Graphics
+     * Driver dropdown. Idempotent: an already-staged import is left untouched.
+     */
+    private fun stagePresetGraphicsDriver() {
+        val identifier = StringUtils.parseIdentifier(PRESET_WRAPPER_LABEL)
+        val wrapperManager = WrapperManager(this)
+        if (wrapperManager.isImported(identifier)) return
+
+        Executors.newSingleThreadExecutor().execute {
+            val archive = File(cacheDir, "$identifier.tzst")
+            try {
+                assets.open("graphics_driver/$identifier.tzst").use { input ->
+                    archive.outputStream().use { output -> input.copyTo(output) }
+                }
+                val imported = wrapperManager.importWrapper(Uri.fromFile(archive), PRESET_WRAPPER_LABEL)
+                if (BuildConfig.DEBUG) Log.d(TAG, "preset graphics driver staged as '$imported'")
+            } catch (e: Exception) {
+                if (BuildConfig.DEBUG) Log.d(TAG, "preset graphics driver staging failed: ${e.message}")
+            } finally {
+                archive.delete()
+            }
+        }
+    }
+
+    /**
+     * Waits out the imagefs install (and the storage permission), creates the preset container if
+     * this first run doesn't have one yet, then boots straight into the target — bypassing the
+     * container list. Polls at 2 Hz for at most [AUTO_LAUNCH_WAIT_MS] and gives up silently (the
+     * normal launcher UI is the fallback) once the target is known to be unlaunchable.
+     */
+    private suspend fun awaitAndLaunchTarget() {
+        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
+        if (!prefs.getBoolean(AUTO_LAUNCH_KEY, true)) return
+        // Falls back to the preset path: on a very first run the preference is only written once
+        // createDefaultContainer() reports success, which happens a moment into this very wait.
+        val target = (prefs.getString(TARGET_EXECUTABLE_KEY, null) ?: "").trim()
+            .ifEmpty { TARGET_EXECUTABLE_PATH }
+
+        val deadline = System.currentTimeMillis() + AUTO_LAUNCH_WAIT_MS
+        while (System.currentTimeMillis() < deadline && !autoLaunchAttempted.value) {
+            val installing = splashViewModel.isInstalling.value
+            if (!installing) createDefaultContainerIfNeeded()
+
+            val storageReady = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Environment.isExternalStorageManager()
+            } else {
+                ContextCompat.checkSelfPermission(this, Manifest.permission.WRITE_EXTERNAL_STORAGE) ==
+                    PackageManager.PERMISSION_GRANTED
+            }
+            val container = if (!installing && storageReady) {
+                val wanted = prefs.getInt(TARGET_CONTAINER_KEY, -1)
+                val containers = containerManager.getContainers()
+                containers.firstOrNull { it.id == wanted } ?: containers.firstOrNull()
+            } else null
+
+            if (container != null) {
+                autoLaunchAttempted.value = true
+                launchTarget(container, target)
+                return
+            }
+            delay(500)
+        }
+    }
+
+    /** Resolves the Wine-side target to a file on disk and hands it to the standard runner. */
+    private fun launchTarget(container: Container, winPath: String) {
+        val exe = WinePath.resolveAndroidPath(container, winPath)
+        if (exe == null || !exe.isFile) {
+            if (BuildConfig.DEBUG) Log.d(TAG, "auto-launch skipped: $winPath -> ${exe?.absolutePath} not on disk")
+            return
+        }
+        val error = ContainerExeRunner.run(this, container, exe)
+        if (error != null && BuildConfig.DEBUG) Log.d(TAG, "auto-launch failed: $error")
+    }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
