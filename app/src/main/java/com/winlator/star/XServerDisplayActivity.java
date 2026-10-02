@@ -1957,7 +1957,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         state.onKeyboard               = this::showGuestKeyboard;
         state.onInputControls          = () -> showInputControlsDialog();
         state.onScreenEffects          = () -> showScreenEffectsDialog();
-        state.onGraphicEngine          = () -> { XServerDrawerState.INSTANCE.selectTab(com.winlator.star.ui.TabType.GRAPHICS); runOnUiThread(() -> if (false) drawerLayout.openDrawer(GravityCompat.START)); };
+        state.onGraphicEngine          = () -> { XServerDrawerState.INSTANCE.selectTab(com.winlator.star.ui.TabType.GRAPHICS); runOnUiThread(() -> { /* side drawer disabled for standalone visual novel */ });
         state.onVibration              = () -> showVibrationDialog();
         state.onOverlayOpacityChange   = () -> {
             float v = XServerDrawerState.INSTANCE.getOverlayOpacityValue();
