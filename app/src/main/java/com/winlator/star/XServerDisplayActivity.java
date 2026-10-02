@@ -3153,6 +3153,8 @@ public class XServerDisplayActivity extends AppCompatActivity {
               runnable.run();
     }
 
+    }
+
     // Method to parse container_id from .desktop file
     private int parseContainerIdFromDesktopFile(File desktopFile) {
         int containerId = 0;
