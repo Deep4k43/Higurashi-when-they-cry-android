@@ -422,36 +422,41 @@ class MainActivity : AppCompatActivity() {
     private fun createDefaultContainer() {
         val prefs = PreferenceManager.getDefaultSharedPreferences(this)
 
+        // Smart Wine selection: Proton-10.0 if present, else bundled Proton
+        val wineTarget = if (java.io.File(filesDir, "installed_wine/Proton-10.0-arm64ec-0").exists()) {
+            "Proton-10.0-arm64ec-0"
+        } else {
+            WineInfo.MAIN_WINE_VERSION.identifier()
+        }
+
+        // Smart FEXCore selection: 2608-0 if present, else bundled 2508-0
+        val fexTarget = if (java.io.File(filesDir, "fexcore/fexcore-2608.tzst").exists()) "2608-0" else "2508-0"
+
         val json = JSONObject().apply {
             put("name", "Higurashi Ch.1")
             put("screenSize", "1280x720")
-            // Display: X11 (the container default, written explicitly so the preset owns it).
+            put("fullscreenMode", 0)
+            put("lc_all", "en_US.UTF-8")
+            put("startupSelection", "2")
             put("extraData", JSONObject().apply {
                 put("displayBackend", Container.DISPLAY_BACKEND_X11)
                 put("autoCloseOnExit", "1")
             })
             put("graphicsDriver", StringUtils.parseIdentifier(PRESET_WRAPPER_LABEL))
-            put("graphicsDriverConfig", Container.DEFAULT_GRAPHICSDRIVERCONFIG)
+            put("graphicsDriverConfig", "maxDeviceMemory=4096,presentMode=mailbox,bcnEmulation=gpu,bcnWorkerThreads=0,bcnEmulationCaps=true,transcodeASTC=true")
             put("dxwrapper", Container.DEFAULT_DXWRAPPER)
-            // version= drives the asset lookup (assets/dxwrapper/dxvk-<version>.tzst) and the
-            // async flag; vkd3dVersion/ddrawrapper are mandatory — a missing one makes the DX
-            // wrapper extraction build a "vkd3d-null" id and bail out.
-            put(
-                "dxwrapperConfig",
-                "version=1.7.2-async,vkd3dVersion=2.8,vkd3dLevel=12_1,ddrawrapper=none," +
-                    "async=1,asyncCache=0,framerate=0,csmt=3"
-            )
-            put("wineVersion", WineInfo.MAIN_WINE_VERSION.identifier())
+            put("dxwrapperConfig", "version=1.7.2-async-1,vkd3dVersion=none,vkd3dLevel=12_1,ddrawWrapper=none,async=1,asyncCache=0,framerate=0,ckpt=1")
+            put("wineVersion", wineTarget)
             put("emulator", "fexcore")
             put("box64Version", "0.3.7")
-            put("fexcoreVersion", "2505-0")
-            put("box64Preset", Box64Preset.PERFORMANCE)
-            put("fexcorePreset", FEXCorePreset.PERFORMANCE)
+            put("fexcoreVersion", fexTarget)
+            put("box64Preset", "Performance (Mali)")
+            put("fexcorePreset", "Performance")
             put("audioDriver", Container.DEFAULT_AUDIO_DRIVER)
             put("drives", Container.DEFAULT_DRIVES)
             put("cpuList", "0-7")
             put("renderer", "vulkan")
-            put("rendererPresentMode", "fifo")
+            put("rendererPresentMode", "mailbox")
             put("runAsAdmin", true)
         }
 
@@ -535,9 +540,26 @@ class MainActivity : AppCompatActivity() {
 
     /** Resolves the Wine-side target to a file on disk and hands it to the standard runner. */
     private fun launchTarget(container: Container, winPath: String) {
-        val exe = WinePath.resolveAndroidPath(container, winPath)
+        var exe = WinePath.resolveAndroidPath(container, winPath)
         if (exe == null || !exe.isFile) {
-            if (BuildConfig.DEBUG) Log.d(TAG, "auto-launch skipped: $winPath -> ${exe?.absolutePath} not on disk")
+            val root = java.io.File("/storage/emulated/0")
+            val p1 = java.io.File(root, "MY GAMES/Higurashi When They Cry Hou - Ch.1 Onikakushi/HigurashiEp01.exe")
+            val p2 = java.io.File(root, "Download/MY GAMES/Higurashi When They Cry Hou - Ch.1 Onikakushi/HigurashiEp01.exe")
+            exe = when {
+                p1.isFile -> p1
+                p2.isFile -> p2
+                else -> {
+                    try {
+                        root.walkTopDown()
+                            .onEnter { !it.name.equals("Android", ignoreCase = true) }
+                            .maxDepth(6)
+                            .firstOrNull { it.isFile && it.name.equals("HigurashiEp01.exe", ignoreCase = true) }
+                    } catch (e: Exception) { null }
+                }
+            }
+        }
+        if (exe == null || !exe.isFile) {
+            if (BuildConfig.DEBUG) Log.d(TAG, "auto-launch skipped: $winPath -> not on disk")
             return
         }
         val error = ContainerExeRunner.run(this, container, exe)
