@@ -1957,7 +1957,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         state.onKeyboard               = this::showGuestKeyboard;
         state.onInputControls          = () -> showInputControlsDialog();
         state.onScreenEffects          = () -> showScreenEffectsDialog();
-        state.onGraphicEngine          = () -> { XServerDrawerState.INSTANCE.selectTab(com.winlator.star.ui.TabType.GRAPHICS); runOnUiThread(() -> { /* side drawer disabled for standalone visual novel */ });
+        state.onGraphicEngine          = () -> { XServerDrawerState.INSTANCE.selectTab(com.winlator.star.ui.TabType.GRAPHICS); runOnUiThread(() -> drawerLayout.openDrawer(GravityCompat.START)); };
         state.onVibration              = () -> showVibrationDialog();
         state.onOverlayOpacityChange   = () -> {
             float v = XServerDrawerState.INSTANCE.getOverlayOpacityValue();
@@ -3151,8 +3151,6 @@ public class XServerDisplayActivity extends AppCompatActivity {
             configChangedCallback = runnable;
         } else
               runnable.run();
-    }
-
     }
 
     // Method to parse container_id from .desktop file
@@ -7089,12 +7087,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 }
                 pendingLinuxBack = () -> {
                     pendingLinuxBack = null;
-        runOnUiThread(() -> { /* side drawer disabled */ });
+                    if (!drawerLayout.isDrawerOpen(GravityCompat.START)) drawerLayout.openDrawer(GravityCompat.START);
                 };
                 drawerLayout.postDelayed(pendingLinuxBack, android.view.ViewConfiguration.getDoubleTapTimeout());
                 return;
             }
-        runOnUiThread(() -> { /* side drawer disabled */ });
+            drawerLayout.openDrawer(GravityCompat.START);
         }
     }
 
@@ -7341,7 +7339,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (environment != null) {
             releasePointerCaptureIfNeeded("open-drawer/shortcut");
             if (!drawerLayout.isDrawerOpen(GravityCompat.START)) {
-        runOnUiThread(() -> { /* side drawer disabled */ });
+                drawerLayout.openDrawer(GravityCompat.START);
             } else {
                 drawerLayout.closeDrawers();
             }
@@ -11145,7 +11143,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         touchpadView.setSensitivity(globalCursorSpeed);
         touchpadView.setMouseEnabled(!isMouseDisabled);
         touchpadView.setFourFingersTapCallback(() -> {
-        runOnUiThread(() -> { /* side drawer disabled */ });
+            if (!drawerLayout.isDrawerOpen(GravityCompat.START)) drawerLayout.openDrawer(GravityCompat.START);
         });
         // The preference persists across launches but was never restored onto the view, so
         // Cursor to Touch silently reverted to off every session until it was toggled again.
