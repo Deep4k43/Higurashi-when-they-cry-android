@@ -7087,12 +7087,12 @@ public class XServerDisplayActivity extends AppCompatActivity {
                 }
                 pendingLinuxBack = () -> {
                     pendingLinuxBack = null;
-                    if (!drawerLayout.isDrawerOpen(GravityCompat.START)) if (false) drawerLayout.openDrawer(GravityCompat.START);
+        runOnUiThread(() -> { /* side drawer disabled */ });
                 };
                 drawerLayout.postDelayed(pendingLinuxBack, android.view.ViewConfiguration.getDoubleTapTimeout());
                 return;
             }
-            if (false) drawerLayout.openDrawer(GravityCompat.START);
+        runOnUiThread(() -> { /* side drawer disabled */ });
         }
     }
 
@@ -7339,7 +7339,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         if (environment != null) {
             releasePointerCaptureIfNeeded("open-drawer/shortcut");
             if (!drawerLayout.isDrawerOpen(GravityCompat.START)) {
-                if (false) drawerLayout.openDrawer(GravityCompat.START);
+        runOnUiThread(() -> { /* side drawer disabled */ });
             } else {
                 drawerLayout.closeDrawers();
             }
@@ -11143,7 +11143,7 @@ public class XServerDisplayActivity extends AppCompatActivity {
         touchpadView.setSensitivity(globalCursorSpeed);
         touchpadView.setMouseEnabled(!isMouseDisabled);
         touchpadView.setFourFingersTapCallback(() -> {
-            if (!drawerLayout.isDrawerOpen(GravityCompat.START)) if (false) drawerLayout.openDrawer(GravityCompat.START);
+        runOnUiThread(() -> { /* side drawer disabled */ });
         });
         // The preference persists across launches but was never restored onto the view, so
         // Cursor to Touch silently reverted to off every session until it was toggled again.
